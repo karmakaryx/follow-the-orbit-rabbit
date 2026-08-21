@@ -1,7 +1,10 @@
 ### Data ###
-*.txt
+/data
 
 ### Environments ###
+/.venv
 .env
 
 ### Custom ###
+/docs
+temp.txt
