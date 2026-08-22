@@ -2,5 +2,6 @@ boto3
 pandas
 parquet
 python-dotenv
-sgp4
 requests
+sgp4
+skyfield
