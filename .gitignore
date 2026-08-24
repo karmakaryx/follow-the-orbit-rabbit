@@ -5,5 +5,8 @@
 /.venv
 .env
 
+### Python ###
+__pycache__/
+
 ### Custom ###
 /docs
