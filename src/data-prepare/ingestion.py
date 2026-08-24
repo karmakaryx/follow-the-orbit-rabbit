@@ -5,7 +5,6 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv()
-
 SPACETRACK_IDENTITY = os.getenv("SPACETRACK_IDENTITY")
 SPACETRACK_PASSWORD = os.getenv("SPACETRACK_PASSWORD")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
@@ -23,17 +22,17 @@ def main():
         timeout=30,
     )
 
-    # 2. 최신 TLE 100건 조회
+    # 2. Fetch latest 100 TLE records
     query_url = (
         "https://www.space-track.org/basicspacedata/query/class/gp/"
         "EPOCH/>now-3/orderby/NORAD_CAT_ID/limit/100/format/json"
     )
     response = session.get(query_url, timeout=30)
 
-    # 응답 검증 (JSON이 맞는지 확인)
+    # Validate response (verify JSON format)
     if response.status_code != 200 or response.text.startswith("<!doctype"):
         raise RuntimeError(
-            f"❌ API 요청 실패 (Status: {response.status_code}): {response.text[:200]}"
+            f"❌ API request failed (Status: {response.status_code}): {response.text[:200]}"
         )
 
     tle_raw_json = response.text
@@ -50,7 +49,7 @@ def main():
         ContentType="application/json",
     )
 
-    print(f"🐇 Raw TLE S3 적재 성공: s3://{S3_BUCKET_NAME}/{s3_key}")
+    print(f"🐇 Raw TLE successfully ingested: s3://{S3_BUCKET_NAME}/{s3_key}")
 
 if __name__ == "__main__":
     main()
