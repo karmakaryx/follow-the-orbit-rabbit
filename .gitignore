@@ -1,12 +1,14 @@
 ### Data ###
-/data
+/data/
 
 ### Environments ###
-/.venv
+/.venv/
 .env
+Dockerfile
 
 ### Python ###
 __pycache__/
 
 ### Custom ###
-/docs
+/docs/
+/dags/
