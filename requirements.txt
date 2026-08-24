@@ -1,7 +1,0 @@
-boto3
-pandas
-parquet
-python-dotenv
-requests
-sgp4
-skyfield
