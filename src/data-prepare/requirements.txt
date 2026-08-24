@@ -1,3 +1,7 @@
 boto3
+pandas
+pyarrow
 python-dotenv
 requests
+sgp4
+skyfield
