@@ -14,6 +14,7 @@ dependencies = [
     "pyarrow>=25.0.1",
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
+    "scipy>=1.16.0",
     "sgp4>=2.27",
     "skyfield>=1.55",
 ]

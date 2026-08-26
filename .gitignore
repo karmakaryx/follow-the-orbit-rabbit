@@ -4,6 +4,7 @@
 ### Environments ###
 /.venv/
 .env
+*.yml
 Dockerfile
 
 ### Python ###
