@@ -3,14 +3,22 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+
 import boto3
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from skyfield.api import load, EarthSatellite
+from skyfield.api import EarthSatellite, load, wgs84
+from skyfield.framelib import itrs
 
 load_dotenv()
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 RAW_S3_KEY = os.getenv("RAW_S3_KEY")
+
+# 1차 screening engine 임계값
+CONJUNCTION_SCREENING_THRESHOLD_KM = float(
+    os.getenv("CONJUNCTION_SCREENING_THRESHOLD_KM", "25.0")
+)
 
 # Space-Track GP(JSON) 응답에서 그대로 가져올 필드
 RAW_COLUMNS = [
@@ -32,8 +40,25 @@ NUMERIC_COLUMNS = [
     "RA_OF_ASC_NODE", "MEAN_MOTION", "MEAN_ANOMALY", "BSTAR",
 ]
 
+# 변동치 계산 대상 궤도 요소. 각도(0~360도로 wrap되는) 컬럼은 ANGLE_COLUMNS에 별도 표시
+DEVIATION_ELEMENTS = [
+    "INCLINATION", "ECCENTRICITY", "ARG_OF_PERICENTER",
+    "RA_OF_ASC_NODE", "MEAN_MOTION", "BSTAR",
+]
+ANGLE_COLUMNS = {"ARG_OF_PERICENTER", "RA_OF_ASC_NODE"}
+
+# 서로 단위가 다른 궤도 요소를 하나의 스코어로 합치기 위한 정규화 스케일 (휴리스틱 초기값)
+DEVIATION_SCALES = {
+    "INCLINATION": 1.0,        # deg
+    "ECCENTRICITY": 0.01,
+    "ARG_OF_PERICENTER": 1.0,  # deg
+    "RA_OF_ASC_NODE": 1.0,     # deg
+    "MEAN_MOTION": 0.01,       # rev/day
+    "BSTAR": 1e-4,
+}
+
 def extract_date_partition(raw_key: str) -> tuple[str, str, str]:
-    # raw/year=2026/month=08/day=22/tle_raw_020100.json -> ('2026','08','22')
+    # raw/year=2026/month=08/day=22/tle_raw_020100.json → ('2026','08','22')
     match = re.search(r"year=(\d{4})/month=(\d{2})/day=(\d{2})", raw_key)
     if not match:
         raise ValueError(f"❌ Could not find date partition in raw key: {raw_key}")
@@ -45,10 +70,58 @@ def compute_eci_state(line1: str, line2: str, name: str, ts) -> dict:
     geocentric = sat.at(sat.epoch)
     x, y, z = geocentric.position.km
     vx, vy, vz = geocentric.velocity.km_per_s
+
+    # ECEF (지구 고정 좌표계) + LLA (위도/경도/고도)
+    ecef_x, ecef_y, ecef_z = geocentric.frame_xyz(itrs).km
+    subpoint = wgs84.subpoint(geocentric)
+
     return {
         "X_KM": x, "Y_KM": y, "Z_KM": z,
         "VX_KM_S": vx, "VY_KM_S": vy, "VZ_KM_S": vz,
+        "ECEF_X_KM": ecef_x, "ECEF_Y_KM": ecef_y, "ECEF_Z_KM": ecef_z,
+        "LAT_DEG": subpoint.latitude.degrees,
+        "LON_DEG": subpoint.longitude.degrees,
+        "ALT_KM": subpoint.elevation.km,
     }
+
+def build_dataframe(records: list[dict], ts) -> pd.DataFrame:
+    ...
+    # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
+def validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    ...
+    # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
+def _angular_delta(curr: pd.Series, prev: pd.Series) -> pd.Series:
+    # 0~360도 wrap-around를 고려한 최단 각도 차 (-180, 180] 범위로 반환
+    diff = (curr - prev + 180) % 360 - 180
+    return diff
+
+def compute_orbital_deviation(df: pd.DataFrame, prev_df: pd.DataFrame | None) -> pd.DataFrame:
+    ...
+    # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
+def compute_conjunction_screening(df: pd.DataFrame, threshold_km: float = CONJUNCTION_SCREENING_THRESHOLD_KM) -> pd.DataFrame:
+    ...
+    # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
+def get_previous_processed_df(s3_client, bucket: str) -> pd.DataFrame | None:
+    # S3 processed/ 하위에서 가장 최근 parquet 파일을 찾아 로드
+    paginator = s3_client.get_paginator("list_objects_v2")
+    latest_key = None
+    latest_modified = None
+
+    for page in paginator.paginate(Bucket=bucket, Prefix="processed/"):
+        for obj in page.get("Contents", []):
+            if latest_modified is None or obj["LastModified"] > latest_modified:
+                latest_modified = obj["LastModified"]
+                latest_key = obj["Key"]
+
+    if latest_key is None:
+        return None
+
+    obj = s3_client.get_object(Bucket=bucket, Key=latest_key)
+    return pd.read_parquet(io.BytesIO(obj["Body"].read()))
 
 def main():
     if not RAW_S3_KEY:
@@ -65,42 +138,29 @@ def main():
         print(f"⚠️ No records found in raw file: {RAW_S3_KEY}")
         return
 
-    # 2. TLE epoch 시점 ECI 상태벡터 계산 (leap second/deltat 파일 다운로드 없이 오프라인 동작)
+    # 2. ECI/ECEF/LLA 계산 (leap second/deltat 파일 다운로드 없이 오프라인 동작)
     ts = load.timescale(builtin=True)
-    rows = []
-    for rec in records:
-        line1 = rec.get("TLE_LINE1")
-        line2 = rec.get("TLE_LINE2")
-        if not line1 or not line2:
-            continue
-
-        try:
-            eci = compute_eci_state(line1, line2, rec.get("OBJECT_NAME", ""), ts)
-        except Exception as e:
-            print(f"⚠️ SGP4 propagation failed (NORAD {rec.get('NORAD_CAT_ID')}): {e}")
-            continue
-
-        row = {col: rec.get(col) for col in RAW_COLUMNS}
-        row.update(eci)
-        rows.append(row)
-
-    if not rows:
+    df = build_dataframe(records, ts)
+    if df.empty:
         print("⚠️ No successfully converted records. Skipping Parquet generation.")
         return
 
-    # 3. 스키마 정리
-    df = pd.DataFrame(rows)
-    df["EPOCH"] = pd.to_datetime(df["EPOCH"])
-    df["NORAD_CAT_ID"] = pd.to_numeric(df["NORAD_CAT_ID"], errors="coerce").astype("Int64")
-    for col in NUMERIC_COLUMNS:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # 3. 데이터 검증
+    df = validate_dataframe(df)
 
-    # 4. Parquet 변환
+    # 4. 궤도 요소 변동치 (직전 processed 스냅샷과 비교)
+    prev_df = get_previous_processed_df(s3_client, S3_BUCKET_NAME)
+    df = compute_orbital_deviation(df, prev_df)
+
+    # 5. 상대 거리 1차 screening
+    df = compute_conjunction_screening(df)
+
+    # 6. Parquet 변환
     buffer = io.BytesIO()
     df.to_parquet(buffer, engine="pyarrow", index=False)
     buffer.seek(0)
 
-    # 5. processed 적재
+    # 7. processed 적재
     year, month, day = extract_date_partition(RAW_S3_KEY)
     now = datetime.now(timezone.utc)
     processed_key = (
