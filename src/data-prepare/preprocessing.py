@@ -2,12 +2,13 @@ import io
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+from scipy.spatial import cKDTree
 from skyfield.api import EarthSatellite, load, wgs84
 from skyfield.framelib import itrs
 
@@ -15,10 +16,22 @@ load_dotenv()
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 RAW_S3_KEY = os.getenv("RAW_S3_KEY")
 
-# 1차 screening engine 임계값
+# 1차 screening engine 임계값: 실제 정밀 충돌위험 계산(3~4단계)의 앞단으로 후보군을 넉넉하게 골라내는 용도
 CONJUNCTION_SCREENING_THRESHOLD_KM = float(
     os.getenv("CONJUNCTION_SCREENING_THRESHOLD_KM", "25.0")
 )
+
+# 심우주/달 궤도 미션(ARTEMIS, Chang'e, Chandrayaan, DRO 등) 제외
+# GEO 고도(~35,786km) + HEO(Molniya/Tundra 등, apogee 최대 ~46,000km)까지는 유지
+DEEP_SPACE_ALT_THRESHOLD_KM = float(
+    os.getenv("DEEP_SPACE_ALT_THRESHOLD_KM", "50000.0")
+)
+
+# 변동치 비교 기준 시간 간격
+DEVIATION_LOOKBACK_HOURS = float(os.getenv("DEVIATION_LOOKBACK_HOURS", "24.0"))
+
+# dt_hours가 최소 간격 미만이면 변화율 계산 자체를 하지 않고 NaN 처리
+MIN_DT_HOURS_FOR_DEVIATION = float(os.getenv("MIN_DT_HOURS_FOR_DEVIATION", "1.0"))
 
 # Space-Track GP(JSON) 응답에서 그대로 가져올 필드
 RAW_COLUMNS = [
@@ -48,6 +61,9 @@ DEVIATION_ELEMENTS = [
 ANGLE_COLUMNS = {"ARG_OF_PERICENTER", "RA_OF_ASC_NODE"}
 
 # 서로 단위가 다른 궤도 요소를 하나의 스코어로 합치기 위한 정규화 스케일 (휴리스틱 초기값)
+# ⚠️ ORBITAL_DEVIATION_METRIC(아래 DEVIATION_SCALES 기반 가중합)은 3단계 모델 학습 입력으로는 사용 안함:
+# 신규 발사 위성처럼 BSTAR 추정이 아직 불안정한 객체에서 BSTAR 항이 전체 점수를 100% 지배하는 문제 확인됨 (2026-08-27, QIANFAN 계열에서 발견)
+# 모델 입력은 DELTA_*_PER_HR 원소별 컬럼을 그대로(혹은 학습셋 기준 정규화해서) 사용할 것. 이 합산 점수는 대략적인 모니터링/스크리닝 참고용으로만 유지
 DEVIATION_SCALES = {
     "INCLINATION": 1.0,        # deg
     "ECCENTRICITY": 0.01,
@@ -105,22 +121,32 @@ def compute_conjunction_screening(df: pd.DataFrame, threshold_km: float = CONJUN
     ...
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
 
-def get_previous_processed_df(s3_client, bucket: str) -> pd.DataFrame | None:
-    # S3 processed/ 하위에서 가장 최근 parquet 파일을 찾아 로드
+def get_reference_processed_df(s3_client, bucket: str, target_time: datetime, tolerance_days: int = 1) -> pd.DataFrame | None:
+    # target_time에 가장 가까운 processed 파일을 찾아 로드
+    candidate_dates = {
+        (target_time + timedelta(days=d)).date() for d in range(-tolerance_days, tolerance_days + 1)
+    }
+    prefixes = [
+        f"processed/year={d.year:04d}/month={d.month:02d}/day={d.day:02d}/" for d in candidate_dates
+    ]
+
+    candidates = []
     paginator = s3_client.get_paginator("list_objects_v2")
-    latest_key = None
-    latest_modified = None
+    for prefix in prefixes:
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            candidates.extend(page.get("Contents", []))
 
-    for page in paginator.paginate(Bucket=bucket, Prefix="processed/"):
-        for obj in page.get("Contents", []):
-            if latest_modified is None or obj["LastModified"] > latest_modified:
-                latest_modified = obj["LastModified"]
-                latest_key = obj["Key"]
-
-    if latest_key is None:
+    if not candidates:
         return None
 
-    obj = s3_client.get_object(Bucket=bucket, Key=latest_key)
+    best = min(candidates, key=lambda o: abs((o["LastModified"] - target_time).total_seconds()))
+    gap_hours = abs((best["LastModified"] - target_time).total_seconds()) / 3600.0
+
+    print(
+        f"🐇 Loading reference processed snapshot: s3://{bucket}/{best['Key']} "
+        f"(target {target_time.isoformat()}, actual gap {gap_hours:.1f}h)"
+    )
+    obj = s3_client.get_object(Bucket=bucket, Key=best["Key"])
     return pd.read_parquet(io.BytesIO(obj["Body"].read()))
 
 def main():
@@ -148,8 +174,10 @@ def main():
     # 3. 데이터 검증
     df = validate_dataframe(df)
 
-    # 4. 궤도 요소 변동치 (직전 processed 스냅샷과 비교)
-    prev_df = get_previous_processed_df(s3_client, S3_BUCKET_NAME)
+    # 4. 궤도 요소 변동치 (약 DEVIATION_LOOKBACK_HOURS 전 스냅샷과 비교)
+    year, month, day = extract_date_partition(RAW_S3_KEY)
+    target_time = datetime.now(timezone.utc) - timedelta(hours=DEVIATION_LOOKBACK_HOURS)
+    prev_df = get_reference_processed_df(s3_client, S3_BUCKET_NAME, target_time)
     df = compute_orbital_deviation(df, prev_df)
 
     # 5. 상대 거리 1차 screening
@@ -161,7 +189,6 @@ def main():
     buffer.seek(0)
 
     # 7. processed 적재
-    year, month, day = extract_date_partition(RAW_S3_KEY)
     now = datetime.now(timezone.utc)
     processed_key = (
         f"processed/year={year}/month={month}/day={day}/"
