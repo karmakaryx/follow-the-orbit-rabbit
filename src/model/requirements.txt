@@ -1,0 +1,9 @@
+boto3
+fastapi
+pandas
+pyarrow
+python-dotenv
+pytorch-lightning
+torch
+uvicorn[standard]
+wandb
