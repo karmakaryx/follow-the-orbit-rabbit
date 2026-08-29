@@ -8,7 +8,6 @@ import boto3
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from scipy.spatial import cKDTree
 from skyfield.api import EarthSatellite, load, wgs84
 from skyfield.framelib import itrs
 
@@ -80,6 +79,7 @@ def extract_date_partition(raw_key: str) -> tuple[str, str, str]:
         raise ValueError(f"❌ Could not find date partition in raw key: {raw_key}")
     return match.group(1), match.group(2), match.group(3)
 
+
 def compute_eci_state(line1: str, line2: str, name: str, ts) -> dict:
     # TLE epoch 시점의 ECI(GCRS) 위치/속도 벡터 계산 (sgp4 propagation via skyfield)
     sat = EarthSatellite(line1, line2, name, ts)
@@ -100,26 +100,32 @@ def compute_eci_state(line1: str, line2: str, name: str, ts) -> dict:
         "ALT_KM": subpoint.elevation.km,
     }
 
+
 def build_dataframe(records: list[dict], ts) -> pd.DataFrame:
     ...
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
 
+
 def validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ...
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
 
 def _angular_delta(curr: pd.Series, prev: pd.Series) -> pd.Series:
     # 0~360도 wrap-around를 고려한 최단 각도 차 (-180, 180] 범위로 반환
     diff = (curr - prev + 180) % 360 - 180
     return diff
 
+
 def compute_orbital_deviation(df: pd.DataFrame, prev_df: pd.DataFrame | None) -> pd.DataFrame:
     ...
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
 
+
 def compute_conjunction_screening(df: pd.DataFrame, threshold_km: float = CONJUNCTION_SCREENING_THRESHOLD_KM) -> pd.DataFrame:
     ...
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
 
 def get_reference_processed_df(s3_client, bucket: str, target_time: datetime, tolerance_days: int = 1) -> pd.DataFrame | None:
     # target_time에 가장 가까운 processed 파일을 찾아 로드
@@ -148,6 +154,7 @@ def get_reference_processed_df(s3_client, bucket: str, target_time: datetime, to
     )
     obj = s3_client.get_object(Bucket=bucket, Key=best["Key"])
     return pd.read_parquet(io.BytesIO(obj["Body"].read()))
+
 
 def main():
     if not RAW_S3_KEY:
@@ -202,6 +209,7 @@ def main():
         ContentType="application/octet-stream",
     )
     print(f"🐇 Processed TLE successfully saved ({len(df)} rows): s3://{S3_BUCKET_NAME}/{processed_key}")
+
 
 if __name__ == "__main__":
     main()
