@@ -12,3 +12,4 @@ __pycache__/
 ### Custom ###
 /docs/
 dags/
+sequence_builder.py
