@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone
+
 import boto3
 import requests
 from dotenv import load_dotenv
@@ -11,6 +12,7 @@ load_dotenv()
 SPACETRACK_IDENTITY = os.getenv("SPACETRACK_IDENTITY")
 SPACETRACK_PASSWORD = os.getenv("SPACETRACK_PASSWORD")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
 
 def main():
     # 1. Space-Track login
@@ -33,9 +35,7 @@ def main():
     response = session.get(query_url, timeout=120)
 
     if response.status_code != 200 or response.text.startswith("<!doctype"):
-        raise RuntimeError(
-            f"❌ API request failed (Status {response.status_code}): {response.text[:200]}"
-        )
+        raise RuntimeError(f"❌ API request failed (Status {response.status_code}): {response.text[:200]}")
 
     tle_raw_json = response.text
 
@@ -50,10 +50,7 @@ def main():
 
     record_count = len(records)
     if record_count < MIN_EXPECTED_RECORDS:
-        raise RuntimeError(
-            f"❌ Record count too low ({record_count} < {MIN_EXPECTED_RECORDS}); "
-            "likely a truncated/failed catalog pull. Aborting upload."
-        )
+        raise RuntimeError(f"❌ Record count too low ({record_count} < {MIN_EXPECTED_RECORDS}). Aborting upload.")
 
     required_fields = {"NORAD_CAT_ID", "EPOCH", "TLE_LINE1", "TLE_LINE2"}
     missing = required_fields - set(records[0].keys())

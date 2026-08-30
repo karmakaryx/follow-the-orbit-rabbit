@@ -59,9 +59,14 @@ DEVIATION_ELEMENTS = [
 ]
 ANGLE_COLUMNS = {"ARG_OF_PERICENTER", "RA_OF_ASC_NODE"}
 
+# 임계값 미만(원궤도)이면 ARG_OF_PERICENTER 델타 NaN 처리
+ECCENTRICITY_NEAR_CIRCULAR_THRESHOLD = float(
+    os.getenv("ECCENTRICITY_NEAR_CIRCULAR_THRESHOLD", "0.01")
+)
+
 # 서로 단위가 다른 궤도 요소를 하나의 스코어로 합치기 위한 정규화 스케일 (휴리스틱 초기값)
 # ⚠️ ORBITAL_DEVIATION_METRIC(아래 DEVIATION_SCALES 기반 가중합)은 3단계 모델 학습 입력으로는 사용 안함:
-# 신규 발사 위성처럼 BSTAR 추정이 아직 불안정한 객체에서 BSTAR 항이 전체 점수를 100% 지배하는 문제 확인됨 (2026-08-27, QIANFAN 계열에서 발견)
+# 신규 발사 위성처럼 BSTAR 추정이 아직 불안정한 객체에서 BSTAR 항이 전체 점수를 100% 지배하는 문제 확인.
 # 모델 입력은 DELTA_*_PER_HR 원소별 컬럼을 그대로(혹은 학습셋 기준 정규화해서) 사용할 것. 이 합산 점수는 대략적인 모니터링/스크리닝 참고용으로만 유지
 DEVIATION_SCALES = {
     "INCLINATION": 1.0,        # deg
@@ -71,6 +76,7 @@ DEVIATION_SCALES = {
     "MEAN_MOTION": 0.01,       # rev/day
     "BSTAR": 1e-4,
 }
+
 
 def extract_date_partition(raw_key: str) -> tuple[str, str, str]:
     # raw/year=2026/month=08/day=22/tle_raw_020100.json → ('2026','08','22')
@@ -153,6 +159,7 @@ def get_reference_processed_df(s3_client, bucket: str, target_time: datetime, to
         f"(target {target_time.isoformat()}, actual gap {gap_hours:.1f}h)"
     )
     obj = s3_client.get_object(Bucket=bucket, Key=best["Key"])
+
     return pd.read_parquet(io.BytesIO(obj["Body"].read()))
 
 
