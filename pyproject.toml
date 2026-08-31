@@ -19,6 +19,7 @@ dependencies = [
     "scipy>=1.16.0",
     "sgp4>=2.27",
     "skyfield>=1.55",
+    "streamlit>=1.62.0",
     "torch>=2.13.0",
     "uvicorn[standard]>=0.52.4",
     "wandb>=0.29.0",
