@@ -6,8 +6,10 @@
 
 ## **🎥 Feature Highlights**
 <p align="center">
-</p>
-<p align="center">
+  <h3>🚨 NOTICE: Phases 1 through 5 will be developed sequentially. Phase 1 is currently open as a prerelease. 🚨</h3>
+  <video src="https://github.com/user-attachments/assets/57bea7e4-fc1c-4020-811b-1905cfd87aff" width="100%" controls autoplay muted loop>
+    Your browser does not support the video tag.
+  </video>
 </p>
 
 ## **🛰️ Project Info**
@@ -23,12 +25,15 @@
 - 예측 기간 제한: SGP4/TLE 특성상 오차가 누적되므로, 향후 3~7일 이내의 단기 충돌 위험 1차 경보에 초점을 맞춤
 
 ### Tech Stack
-- Airflow (데이터 파이프라인, 오케스트레이션)
-- S3 (데이터 적재, 아티팩트 저장)
-- PyTorch Lightning (모델 학습)
-- W&B (실험 관리)
-- FastAPI (추론 서빙)
-- Minikube/EKS (K8s) & GitHub Actions (CI/CD 자동 배포)
+> 💡 **Note:** Additional specs and components are currently under design.
+- **Airflow** (Data Pipeline & Orchestration)
+- **S3** (Data Lake & Artifact Storage)
+- **PyTorch Lightning** (Model Training)
+- **W&B** (Experiment Tracking & Monitoring)
+- **FastAPI** (Inference Serving)
+- **Minikube** (Alternative to EKS for K8s)
+- **GitHub Actions** (CI/CD Deployment)
+- **Streamlit** (Dashboard)
 
 ---
 
@@ -69,10 +74,13 @@
 - W&B가 무료 티어이므로 artifact storage 소모 없도록 checkpoint와 scaler는 S3 models/ 경로로 업로드하고 W&B에는 S3 key만 전송
 
 ### STEP 4. [추론/서빙] Serving & Deployment (FastAPI + Minikube)
-- FastAPI 서빙: 특정 NORAD ID의 궤도 이상 스코어(reconstruction loss) 반환
+- 모델 학습과 추론/서빙이 feature 로직(sequence_builder 등)을 그대로 공유하므로 같은 디렉토리 유지
+- FastAPI 서빙: 특정 NORAD ID 입력 시 NORAD ID의 궤도 이상 스코어(reconstruction loss) 반환
 - 위성이 갑자기 궤도를 급격히 이탈하거나 우주 쓰레기 충돌 위험 등으로 이상 궤도를 그리면, 모델이 이 패턴을 복원하지 못해 재구성 손실이 치솟게 되는데 이 오차 수치(loss) 자체를 궤도 이상 스코어(perturbation score)로 활용
 - 시작 시 S3에서 가장 최근 checkpoint를 자동으로 찾아 로드
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 -> 윈도우 -> feature 추출)으로 구성해 추론
+
+### STEP 5. Under development..
 
 ---
 
@@ -101,7 +109,7 @@ eg. ISS 관련 25544/25575/26400/26700/36086: ISS는 모듈(Zarya, Unity, Zvezda
 median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"를 기준점으로 잡기에 더 안정적
 
 - [STEP 3] sequence_builder에서 clip(1st/99th percentile)을 같이 두는 이유: `DELTA_ARG_OF_PERICENTER_PER_HR`, `DELTA_RA_OF_ASC_NODE_PER_HR` 같은 각도 기반 델타는 preprocessing 단계에서 0/360도 경계를 넘어갈 때 wraparound 처리가 안 되어 있으면 (eg. 359.9도 → 0.1도인데 단순 차감하면 -359.8로 계산됨) 물리적으로 말이 안 되는 극단치가 섞일 수 있음 (실측: 정상 범위 IQR ~0.2 vs 실제 관측된 최댓값 67 등)<br>
-이 값들이 scaling 후 그대로 들어가면 MSE loss가 소수의 이상치에 압도되므로, 학습 안정성을 위해 1st~99th percentile로 clip
+이 값들이 scaling 후 그대로 들어가면 MSE loss가 소수의 이상치에 압도되므로, 학습 안정성을 위해 1st-99th percentile로 clip
 
 - [STEP 3] **수정 필요** 모델 학습에서 객체 기준 split을 쓰는 이유: sequence_builder가 지금은 객체당 "최신 윈도우 1개"만 만들기 때문에 사실상 객체 하나 = 샘플 하나. 시간 기준으로 자르면 한 객체의 짧은 시퀀스를 더 쪼개는 셈이라 의미가 없어 객체를 통째로 train/val에 배정. 단 객체 단위로 먼저 train/val id를 나누고, scaler는 train 객체의 원본 df 값으로만 계산 (val 정보가 스케일링에 섞여 들어가는 leakage 방지)
 
@@ -146,43 +154,48 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 
 ### 2026-08-30 ~ 2026-08-31
 - AI 모델 서빙 개발 착수: S3에 적재된 동일 timestamp 쌍의 checkpoint와 scaler 파일 호출해 사용
+- model-serving은 S3에 체크포인트 존재하지 않을 경우 재시작 하도록 개발
 - model_training_dag 작성: 수집(ingestion)은 시간당이지만, 학습 입력이 보는 `SEQUENCE_WINDOW_HOURS`(기본 72h) window 기준으로는 하루 여러 번 재학습해도 입력 분포 변화가 거의 없으므로 매일 1회(UTC 03h, 하루치 수집이 누적된 이후)로 설정
+- Streamlit으로 MVP dashboard 작성 (Phase 3에서 React 전환 예정. 사용자 친화적인 부가기능 추가한 UI 설계 필요)<br>
+  FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만
 
 ---
 
 ## **⚙️ Components**
 ### Architecture
-![architecture](./assets/workflow.png)
+Under design..
 
 ### Directory
 ```
-├── .venv/...                      # (GitHub 관리 제외)
-├── assets/...                     # README images
-├── src/
-│   ├── dags/
-│   │   ├── ingestion_dag.p        #
-│   │   └── model_training_dag.py  #
-│   ├── data-prepare/
-│   │   ├── Dockerfile             #
-│   │   ├── ingestion.py           #
-│   │   ├── preprocessing.py       #
-│   │   └── requirements.txt       #
-│   └── model/
-│       ├── Dockerfile             #
-│       ├── model.py               #
-│       ├── requirements.txt       #
-│       ├── sequence_builder.py    # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
-│       ├── serve.py               #
-│       ├── torch_dataset.py       # padding/masking
-│       └── train.py               #
-├── .env                           #
-├── .env.example                   #
+├── .venv/...                  # (GitHub 관리 제외)
+├── assets/...                 # README images
+├── dags/                      # (GitHub 관리 제외)
+│   ├── ingestion_dag.py       #
+│   └── model_training_dag.py  #
+├── dashboard/                 # serve.py의 HTTP API만 호출하는 임시 MVP UI
+│   ├── requirements.txt       #
+│   └── streamlit_app.py       #
+├── data-prepare/
+│   ├── Dockerfile             #
+│   ├── ingestion.py           #
+│   ├── preprocessing.py       #
+│   └── requirements.txt       #
+├── model/                     #
+│   ├── Dockerfile             #
+│   ├── model.py               #
+│   ├── requirements.txt       #
+│   ├── sequence_builder.py    # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
+│   ├── serve.py               #
+│   ├── torch_dataset.py       # padding/masking
+│   └── train.py               #
+├── .env                       #
+├── .env.example               #
 ├── .gitignore
-├── docker-compose.yml             #
-├── Dockerfile.airflow             #
-├── pyproject.toml                 #
+├── docker-compose.yml         # (GitHub 관리 제외)
+├── Dockerfile.airflow         #
+├── pyproject.toml             #
 ├── README.md
-└── uv.lock                        #
+└── uv.lock                    #
 ```
 
 ---
