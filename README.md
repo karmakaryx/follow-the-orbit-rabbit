@@ -7,7 +7,7 @@
 ## **🎥 Feature Highlights**
 🚨 NOTICE: Phases 1 thru 5 will be developed sequentially. Phase 1 is currently open as a prerelease. 🚨
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/57bea7e4-fc1c-4020-811b-1905cfd87aff" width="100%" controls autoplay muted loop>
+  <video src="https://github.com/user-attachments/assets/d4578773-fef8-424d-b090-91b59aec3681" width="100%" controls autoplay muted loop>
     Your browser does not support the video tag.
   </video>
 </p>
