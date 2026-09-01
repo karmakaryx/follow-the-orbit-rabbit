@@ -1,7 +1,7 @@
 ![banner_ftor](./assets/banner_ftor.jpg)
 
 <div align="center">
-  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, W&B, Kubernetes and FastAPI</h3>
+  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, MLflow, Kubernetes and FastAPI</h3>
 </div>
 
 ## **🎥 Feature Highlights**
@@ -30,14 +30,17 @@
 
 ### Tech Stack
 > 💡 **Note:** Additional specs and components are currently under design.
-- **Airflow** (Data Pipeline & Orchestration)
-- **S3** (Data Lake & Artifact Storage)
-- **PyTorch Lightning** (Model Training)
-- **W&B** (Experiment Tracking & Monitoring)
-- **FastAPI** (Inference Serving)
-- **Minikube** (Alternative to EKS for K8s)
-- **GitHub Actions** (CI/CD Deployment)
-- **Streamlit** (Dashboard)
+- **Airflow:** Data Pipeline & Automated Orchestration
+- **S3:** Data Lake & Artifact Storage
+- **Docker:** Task-Isolated Experimentation Infrastructure
+- **PyTorch Lightning:** Model Training
+- **W&B:** Experiment Tracking & Performance Monitoring
+- **MLflow:** Model Registry
+- **FastAPI:** Inference Serving
+- **Minikube:** Kubernetes Cluster (Local Alternative to EKS)
+- **GitHub Actions:** CI/CD Deployment
+- **Amazon SQS:** Message Queue
+- **Streamlit:** Dashboard
 
 ---
 
@@ -160,6 +163,12 @@
 - Authored model_training_dag: While data ingestion runs hourly, the sequence window (`SEQUENCE_WINDOW_HOURS`, default 72h) exhibits negligible input distribution shifts across intra-day retraining. Set training frequency to daily execution (03:00 UTC, post daily ingestion accumulation)
 - Built MVP dashboard using Streamlit (migration to React planned for Phase 3; user-friendly UI/UX design pending)<br>
   Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}
+
+### 2026-09-01 ~ 2026-09-02
+- Produced Streamlit dashboard demon video
+- Done with the README for Phase 1
+- Published Phase 1 pre-release
+- Initiated Phase 2 development
 
 ---
 

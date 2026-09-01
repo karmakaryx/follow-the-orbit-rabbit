@@ -1,7 +1,7 @@
 ![banner_ftor](./assets/banner_ftor.jpg)
 
 <div align="center">
-  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, W&B, Kubernetes and FastAPI</h3>
+  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, MLflow, Kubernetes and FastAPI</h3>
 </div>
 
 ## **🎥 Feature Highlights**
@@ -30,14 +30,17 @@
 
 ### Tech Stack
 > 💡 **Note:** Additional specs and components are currently under design.
-- **Airflow** (Data Pipeline & Orchestration)
-- **S3** (Data Lake & Artifact Storage)
-- **PyTorch Lightning** (Model Training)
-- **W&B** (Experiment Tracking & Monitoring)
-- **FastAPI** (Inference Serving)
-- **Minikube** (Alternative to EKS for K8s)
-- **GitHub Actions** (CI/CD Deployment)
-- **Streamlit** (Dashboard)
+- **Airflow:** Data Pipeline & Automated Orchestration
+- **S3:** Data Lake & Artifact Storage
+- **Docker:** Task-Isolated Experimentation Infrastructure
+- **PyTorch Lightning:** Model Training
+- **W&B:** Experiment Tracking & Performance Monitoring
+- **MLflow:** Model Registry
+- **FastAPI:** Inference Serving
+- **Minikube:** Kubernetes Cluster (Local Alternative to EKS)
+- **GitHub Actions:** CI/CD Deployment
+- **Amazon SQS:** Message Queue
+- **Streamlit:** Dashboard
 
 ---
 
@@ -162,6 +165,12 @@
 - model_training_dag 작성: 수집(ingestion)은 시간당이지만, 학습 입력이 보는 `SEQUENCE_WINDOW_HOURS`(기본 72h) window 기준으로는 하루 여러 번 재학습해도 입력 분포 변화가 거의 없으므로 매일 1회(UTC 03:00, 하루치 수집이 누적된 이후)로 설정
 - Streamlit으로 MVP dashboard 작성 (Phase 3에서 React 전환 예정. 사용자 친화적인 부가기능 추가한 UI 설계 필요)<br>
   FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만
+
+### 2026-09-01 ~ 2026-09-02
+- Streamlit dashboard 데모 영상 제작
+- Phase 1 README 작성 완료
+- 개발 Phase 1 사전 배포
+- 개발 Phase 2 개발 착수
 
 ---
 
