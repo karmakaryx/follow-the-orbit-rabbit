@@ -51,7 +51,7 @@
 - Coordinate transformation using SGP4 and Skyfield libraries: TLE → ECI → ECEF → LLA
 - Data Validation: Schema verification, missing value checks, and value range validation
 - Deep Space & Lunar Orbit Filtering: Exclude objects with ALT_KM > 50,000 km, while retaining GEO and HEO
-- Orbital Element Variations: Calculate anomalous rate-of-change features based on inclination ($i$), eccentricity ($e$), argument of pericenter ($\omega$), mean motion ($n$), etc.
+- Orbital Element Variations: Calculate anomalous rate-of-change features based on inclination($i$), eccentricity($e$), argument of pericenter($\omega$), mean motion($n$), etc.
 - Screening Engine: Primary filtering by orbital similarity groups using a KDTree-based spatial index to rapidly extract proximity candidates instead of evaluating all pairwise combinations
 - Relative Distance Calculation: Identify potential collision risks by evaluating whether the relative distance between two objects falls within a defined proximity threshold
 - Convert data to Parquet format and store in S3 processed path (e.g. `s3://my-bucket/processed/year=2026/month=08/day=22/tle_processed_020100.parquet`)
@@ -99,7 +99,7 @@
 - **[STEP 2]** Cases where MIN_DISTANCE_KM == 0 (35 occurrences): Verified as expected behavior rather than a software bug. These represent physically attached structures evaluated near their respective TLE epochs without common-epoch propagation.<br>
   *Example:* ISS modules (NORAD IDs 25544, 25575, 26400, 26700, 36086: Zarya, Unity, Zvezda, Destiny, Poisk) carry separate NORAD IDs despite forming a single physical structure, resulting in identical spatial coordinates.
 
-- **[STEP 3]** Detection of Future Epoch Dates: Verified host system time integrity inside the container, then inspected raw JSON to confirm Space-Track explicitly serves future epochs. Objects exhibited `MEAN_MOTION` values below 1.0 rev/day, identifying them as high-altitude, long-period orbits (GTO, HEO, near-lunar). Radar tracking opportunities for such orbits are infrequent, making epochs shifted several days to two weeks into the future standard operational behavior. Since these are automatically filtered by min_snapshots conditions down the line, no manual correction is required.
+- **[STEP 3]** Detection of Future EPOCH Dates: Verified host system time integrity inside the container, then inspected raw JSON to confirm Space-Track explicitly serves future epochs. Objects exhibited `MEAN_MOTION` values below 1.0 rev/day, identifying them as high-altitude, long-period orbits (GTO, HEO, near-lunar). Radar tracking opportunities for such orbits are infrequent, making epochs shifted several days to two weeks into the future standard operational behavior. Since these are automatically filtered by min_snapshots conditions down the line, no manual correction is required.
 
 - **[STEP 2]** Observed cases where newly launched satellites with unstable BSTAR estimates had anomaly scores dominated 100% by BSTAR alone. Removed `ORBITAL_DEVIATION_METRIC` (a single composite score summing element-wise deltas on fixed scales) from model inputs. Instead, raw element-wise deltas across 6 columns are directly fed into the model, allowing the LSTM Autoencoder to learn normal patterns autonomously.
 
@@ -111,7 +111,7 @@
 
 - **[STEP 3]** Rationale for Robust Scaling (Median/IQR) over Mean/Std in sequence_builder: Features such as `DELTA_BSTAR_PER_HR` frequently exhibit extreme outliers, like in newly launched satellites. Mean and standard deviation are sensitive to these extremes (Caused by the same issue already identified in STEP 2). Median and IQR remain robust against extreme values, providing a stable baseline for "typical" orbital behavior.
 
-- **[STEP 3]** Rationale for Percentile Clipping (1st/99th) in sequence_builder: Angular delta features such as `DELTA_ARG_OF_PERICENTER_PER_HR`, `DELTA_RA_OF_ASC_NODE_PER_HR` produce unphysical outliers when $0^\circ/360^\circ$ boundary wraparound is unhandled during preprocessing (e.g. $359.9^\circ → 0.1^\circ$ calculated as $-359.8^\circ$; observed normal range IQR $\sim0.2$ vs observed max $67$). Passing unclipped values after scaling causes MSE loss to be dominated by a small number of anomalies. Applied 1st–99th percentile clipping to ensure training stability.
+- **[STEP 3]** Rationale for Percentile Clipping (1st/99th) in sequence_builder: Angular delta features such as `DELTA_ARG_OF_PERICENTER_PER_HR`, `DELTA_RA_OF_ASC_NODE_PER_HR` produce unphysical outliers when $0^\circ/360^\circ$ boundary wraparound is unhandled during preprocessing (e.g. $359.9^\circ → 0.1^\circ$ calculated as $-359.8^\circ$; observed normal range IQR ~0.2 vs observed max 67). Passing unclipped values after scaling causes MSE loss to be dominated by a small number of anomalies. Applied 1st–99th percentile clipping to ensure training stability.
 
 - **[STEP 3]** Object-Based Data Splitting: Since sequence_builder currently generates "one latest window" per object, one object effectively corresponds to one sample. Time-based splitting would further fragment short single-object sequences arbitrarily. Splitting is therefore performed at the object level across train/val sets. Scalers are computed exclusively on raw DataFrames from training objects to prevent data leakage from validation sets.
 
@@ -121,7 +121,7 @@
 ### 2026-08-19
 - Project Kickoff: Inspired by Rocket Lab (after watching the HBO documentary "Wild Wild Space")
 - Came up with a concept while listening to The Enid's debut album:<br>
-*"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
+  *"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
 - Set up GitHub repository
 
 ### 2026-08-20 ~ 2026-08-21
@@ -158,7 +158,7 @@
 - Started model serving implementation: Loaded corresponding timestamped checkpoint and scaler pairs from S3
 - Implemented automatic restart logic for model-serving when checkpoint files are absent in S3
 - Authored model_training_dag: While data ingestion runs hourly, the sequence window (`SEQUENCE_WINDOW_HOURS`, default 72h) exhibits negligible input distribution shifts across intra-day retraining. Set training frequency to daily execution (03:00 UTC, post daily ingestion accumulation)
-- Built MVP dashboard using Streamlit (migration to React planned for Phase 3; user-friendly UI/UX design pending)
+- Built MVP dashboard using Streamlit (migration to React planned for Phase 3; user-friendly UI/UX design pending)<br>
   Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}
 
 ---
@@ -172,33 +172,33 @@ Under design..
 ├── .venv/...                  # (excluded from GitHub)
 ├── assets/...                 # README images
 ├── dags/                      # (excluded from GitHub)
-│   ├── ingestion_dag.py       #
-│   └── model_training_dag.py  #
+│   ├── ingestion_dag.py       # DAG for Space-Track TLE ingestion & preprocessing
+│   └── model_training_dag.py  # DAG for LSTM Autoencoder model training
 ├── dashboard/                 # temporary MVP UI consuming serve.py HTTP API
-│   ├── requirements.txt       #
-│   └── streamlit_app.py       #
+│   ├── requirements.txt       # dashboard dependencies
+│   └── streamlit_app.py       # Streamlit app
 ├── data-prepare/
-│   ├── Dockerfile             #
-│   ├── ingestion.py           #
-│   ├── preprocessing.py       #
-│   └── requirements.txt       #
-├── model/                     #
-│   ├── Dockerfile             #
-│   ├── model.py               #
-│   ├── requirements.txt       #
+│   ├── Dockerfile             # container image for ingestion/preprocessing
+│   ├── ingestion.py           # catalog ingestion, validation, storage
+│   ├── preprocessing.py       # coordinate transformation, validation, orbital element variations, proximity screening
+│   └── requirements.txt       # ingestion/preprocessing dependencies
+├── model/                     # shared directory containing feature logic for training & serving
+│   ├── Dockerfile             # container image for training/serving
+│   ├── model.py               # LSTM Autoencoder architecture definition
+│   ├── requirements.txt       # training/serving dependencies
 │   ├── sequence_builder.py    # per-object windowing, gap handling (excluded from GitHub)
-│   ├── serve.py               #
+│   ├── serve.py               # FastAPI inference serving
 │   ├── torch_dataset.py       # padding & masking
-│   └── train.py               #
-├── .env                       #
-├── .env.example               #
+│   └── train.py               # sequence construction, model training, W&B logging
+├── .env                       # environment variables
+├── .env.example               # template for environment variables
 ├── .gitignore
 ├── docker-compose.yml         # (excluded from GitHub)
-├── Dockerfile.airflow         #
-├── pyproject.toml             #
+├── Dockerfile.airflow         # custom Airflow container image
+├── pyproject.toml             # project configuration & dependencies
 ├── README_KR.md
 ├── README.md
-└── uv.lock                    #
+└── uv.lock                    # dependency lock file
 ```
 
 ---

@@ -45,7 +45,7 @@
 ### STEP 1. [수집] Data Ingestion (Airflow)
 - Space-Track REST API 호출
 - 관심 발사체·위성군(eg. Starlink, LEO 우주쓰레기)의 TLE 전체 카탈로그(약 35,000건)를 주기적으로 증분 수집
-- 원본 JSON를 S3 raw 적재 (eg. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
+- 원본 json을 S3 raw 적재 (eg. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
 ### STEP 2. [전처리/가공] Preprocessing & Feature Engineering
 - SGP4 및 Skyfield 라이브러리를 사용하여 좌표 변환: TLE → ECI → ECEF → LLA
@@ -89,7 +89,7 @@
 ---
 
 ## **💡 Insights from Trial and Error**
-- **[STEP 1]** 프로토타입에서는 EPOCH 필터링으로 최근 3일내 갱신된 객체 100건만 수집했으나 실제 활용을 위해 전체 카탈로그 수집으로 변경. 그러면 모든 pairwise 거리 계산은 조합 수가 억 단위라 brute force로는 불가능하므로 CelesTrak, Socrates같은 실제 충돌 스크리닝 시스템처럼 궤도 유사군(고도대/경사각 등)으로 1차 필터링하고 KDTree로 근접 후보만 빠르게 추출
+- **[STEP 1]** 프로토타입에서는 EPOCH 필터링으로 최근 3일내 갱신된 객체 100건만 수집했으나 실제 활용을 위해 전체 카탈로그 수집으로 변경. 그러면 모든 pairwise 거리 계산은 조합 수가 억 단위라 brute force로는 불가능하므로 CelesTrak, SOCRATES같은 실제 충돌 스크리닝 시스템처럼 궤도 유사군(고도대/경사각 등)으로 1차 필터링하고 KDTree로 근접 후보만 빠르게 추출
 
 - **[STEP 2] 궤도 요소 기반 변동치**
   - 궤도 요소 (경사각/이심률/근지점인구각/승교점적경/평균운동/BSTAR) 기반 변화율: 스케줄링(1시간) 간격으로 비교했더니 35,052개 중 35,051개가 epoch 완전히 동일. TLE 데이터는 하루 2~4회 정도만 갱신됨을 확인 후 24시간전 스냅샷과 비교로 변경
@@ -123,7 +123,7 @@
 ### 2026-08-19
 - 프로젝트 착수: Inspired by Rocket Lab (HBO documentary "Wild Wild Space"를 본 뒤)
 - The Enid의 데뷔앨범을 듣다가 문득 떠오른 컨셉:<br>
-*"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
+  *"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
 - GitHub repository 설정
 
 ### 2026-08-20 ~ 2026-08-21
@@ -174,33 +174,33 @@ Under design..
 ├── .venv/...                  # (GitHub 관리 제외)
 ├── assets/...                 # README images
 ├── dags/                      # (GitHub 관리 제외)
-│   ├── ingestion_dag.py       #
-│   └── model_training_dag.py  #
+│   ├── ingestion_dag.py       # Space-Track TLE 수집 및 전처리 DAG
+│   └── model_training_dag.py  # LSTM Autoencoder 학습 DAG
 ├── dashboard/                 # serve.py의 HTTP API만 호출하는 임시 MVP UI
-│   ├── requirements.txt       #
-│   └── streamlit_app.py       #
+│   ├── requirements.txt       # dashboard dependencies
+│   └── streamlit_app.py       # Streamlit app
 ├── data-prepare/
-│   ├── Dockerfile             #
-│   ├── ingestion.py           #
-│   ├── preprocessing.py       #
-│   └── requirements.txt       #
-├── model/                     #
-│   ├── Dockerfile             #
-│   ├── model.py               #
-│   ├── requirements.txt       #
+│   ├── Dockerfile             # ingestion/preprocessing 컨테이너 이미지
+│   ├── ingestion.py           # 카탈로그 수집, 검증, 적재
+│   ├── preprocessing.py       # 좌표변환, 검증, 궤도 변동치, 근접 스크리닝
+│   └── requirements.txt       # ingestion/preprocessing dependencies
+├── model/                     # 학습과 서빙이 feature 로직 공유
+│   ├── Dockerfile             # 학습/서빙 겸용 컨테이너 이미지
+│   ├── model.py               # LSTM Autoencoder 정의
+│   ├── requirements.txt       # training/serving dependencies
 │   ├── sequence_builder.py    # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
-│   ├── serve.py               #
+│   ├── serve.py               # FastAPI inference serving
 │   ├── torch_dataset.py       # padding & masking
-│   └── train.py               #
-├── .env                       #
-├── .env.example               #
+│   └── train.py               # 시퀀스 구성, 학습, W&B logging
+├── .env                       # 실제 환경변수
+├── .env.example               # 환경변수 템플릿
 ├── .gitignore
 ├── docker-compose.yml         # (GitHub 관리 제외)
-├── Dockerfile.airflow         #
-├── pyproject.toml             #
+├── Dockerfile.airflow         # Airflow 이미지
+├── pyproject.toml             # 프로젝트 의존성 정의
 ├── README_KR.md
 ├── README.md
-└── uv.lock                    #
+└── uv.lock                    # 의존성 lock 파일
 ```
 
 ---
