@@ -20,7 +20,7 @@ jobs:
         run: kubectl get nodes
 
       - name: Install script dependencies
-        run: pip install --break-system-packages -r scripts/deploy/requirements.txt
+        run: pip3 install --break-system-packages -r scripts/deploy/requirements.txt
 
       - name: Check for new checkpoint and roll out if needed
         env:
