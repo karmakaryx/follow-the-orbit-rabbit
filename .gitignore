@@ -5,11 +5,13 @@
 /.venv/
 .env
 *.yml
+!deploy-model.yml
+02-secret.yaml
 
 ### Python ###
 __pycache__/
 
 ### Custom ###
 /docs/
-dags/
+/dags/
 sequence_builder.py
