@@ -2,7 +2,7 @@ name: Deploy Latest Model Checkpoint
 
 on:
   schedule:
-    - cron: "28 6 * * *"
+    - cron: "28 15 * * *"
   workflow_dispatch: {}
 
 concurrency:
