@@ -37,8 +37,9 @@
 - **W&B:** Experiment Tracking & Performance Monitoring
 - **MLflow:** Model Registry
 - **FastAPI:** Inference Serving
-- **Minikube:** Kubernetes Cluster (Local Alternative to EKS)
-- **GitHub Actions:** CI/CD Deployment
+- **Minikube:** Local Kubernetes Cluster (EKS Alternative)
+- **AWS Lambda:** Serverless Event Trigger
+- **GitHub Actions:** CI/CD Pipeline
 - **Amazon SQS:** Message Queue
 - **Streamlit:** Dashboard
 
@@ -48,6 +49,7 @@
 ### STEP 1. [수집] Data Ingestion (Airflow)
 - Poll Space-Track REST API.
 - Periodically perform incremental ingestion of the full TLE catalog (~35,000 objects) for launch vehicles and satellite constellations of interest (e.g. Starlink, LEO space debris).
+- Collect active objects only ((where decay date is empty)
 - Store raw JSON in S3 (e.g. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
 ### STEP 2. [전처리/가공] Preprocessing & Feature Engineering
@@ -79,19 +81,22 @@
 - Input normal TLE sequences (e.g. continuous orbital trajectories over the past 30 days) into the LSTM Autoencoder to learn compressed representations and reconstructions of normal orbital perturbation patterns.
 - Load processed Parquet files → Filter outdated TLEs → Construct sequences → Perform object-based 85/15 train/val split (preventing data leakage) → Train → Log to W&B
 - To avoid consuming W&B artifact storage on the free tier, model checkpoints and scalers are uploaded to s3://models/, while logging only the corresponding S3 keys to W&B.
+- The DAG handles training and checkpoint upload, leaving deployment to K8s rolling updates
 
 ### STEP 4. [추론/서빙] Inference & Serving (FastAPI)
 - Training and inference share identical directory structures and feature extraction logic (sequence_builder and so on).
 - FastAPI Serving: Accepts a target NORAD ID and returns its orbital anomaly score (reconstruction loss)
 - If a satellite undergoes a sudden trajectory deviation or anomalous orbit due to collision risks, the model fails to reconstruct the pattern, causing reconstruction loss to spike. This loss value is directly used as the perturbation score.
-- Automatically locates and loads the latest model checkpoint from S3 upon startup.
+- Automatically fetches and loads the latest checkpoint from S3 upon startup (no hot reloading)
 - Upon request, aggregates recent processed snapshots from S3 (with caching enabled) and constructs target sequences using the exact same pipeline as training (stale TLE filter → windowing → feature extraction) for inference.
 
-### STEP 5. Under development..
+### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
+- Under development..
 
 ---
 
 ## **💡 Insights from Trial and Error**
+> **PHASE 1:**
 - **[STEP 1]** In the prototype, ingestion was limited to 100 recently updated objects within 3 days. Switched to full catalog ingestion for production readiness. Consequently, calculating pairwise distances across hundreds of millions of combinations became computationally infeasible via brute force. Adopted a two-stage approach similar to real-world operational systems (e.g. CelesTrak, SOCRATES): primary filtering by orbital similarity groups (altitude, inclination), followed by KDTree spatial indexing for fast proximity candidate extraction.
 
 - **[STEP 2] Orbital Element Variations**
@@ -118,27 +123,40 @@
 
 - **[STEP 3]** Object-Based Data Splitting: Since sequence_builder currently generates "one latest window" per object, one object effectively corresponds to one sample. Time-based splitting would further fragment short single-object sequences arbitrarily. Splitting is therefore performed at the object level across train/val sets. Scalers are computed exclusively on raw DataFrames from training objects to prevent data leakage from validation sets.
 
+> **PHASE 2:**
+- Evaluated GitOps (ArgoCD-based automation), Helm, and Kustomize during initial design, but deemed them over-engineered for a single model-serving pipeline. Excluded as they exceed the current scope and purpose of the project.
+
+---
+
+## 📊 MLOps Pipeline & Workflow Execution
+### 1. Experiment Logger
+![wandb1](./assets/wandb1.png)
+
+### 2. Actions & CI/CD Workflows
+![workflow1](./assets/workflow1.png)
+![workflow2](./assets/workflow2.png)
+
 ---
 
 ## **📜 Project Development Log**
-### 2026-08-19
+#### 2026-08-19
 - Project Kickoff: Inspired by Rocket Lab (after watching the HBO documentary "Wild Wild Space")
 - Came up with a concept while listening to The Enid's debut album:<br>
   *"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
 - Set up GitHub repository
 
-### 2026-08-20 ~ 2026-08-21
+#### 2026-08-20 ~ 2026-08-21
 - Signed up for Space-Track.org
 - Configured local development environment (WSL2, Docker, Airflow, etc.)
 - Created AWS S3 bucket
 
-### 2026-08-22 ~ 2026-08-23
+#### 2026-08-22 ~ 2026-08-23
 - Designed project architecture
 - Authored ingestion scripts
 - Ingested 100 recent objects for prototype pipeline testing
 - Implemented Dockerfile and verified standalone execution
 
-### 2026-08-24 ~ 2026-08-25
+#### 2026-08-24 ~ 2026-08-25
 - Started preprocessing script development
 - Acquired domain knowledge to build rule-based algorithm logic for preprocessing
 - Verified local execution via uv run airflow standalone
@@ -146,25 +164,25 @@
 - Configured scheduled test runs for hourly full-catalog ingestion
 - Performed sample schema validation on mandatory fields against initial records
 
-### 2026-08-26 ~ 2026-08-27
+#### 2026-08-26 ~ 2026-08-27
 - Conducted the 2nd Preprocessing & Feature Engineering development; debugged outputs against transformed data
 - Deep Space & Lunar Orbit Filtering: Excluded objects with ALT_KM > 50,000km while maintaining GEO/HEO objects
 - Identified issue where the BSTAR feature dominated 100% of the composite `ORBITAL_DEVIATION_METRIC` (observed in QIANFAN series)
 
-### 2026-08-28 ~ 2026-08-29
+#### 2026-08-28 ~ 2026-08-29
 - Initiated ML model development: Fetched preprocessed parquet files from S3 for training pipelines
 - W&B Setup: Configured automated logging for training runs, hyperparameters, and metrics via W&B, while decoupling artifact storage to S3
 - Debugged val_loss spikes in LSTM Autoencoder: Identified 138 extreme outlier cases where eccentricity was $\le 0.0019$ (near-circular orbits)
 - Configured CORS settings
 
-### 2026-08-30 ~ 2026-08-31
+#### 2026-08-30 ~ 2026-08-31
 - Started model serving implementation: Loaded corresponding timestamped checkpoint and scaler pairs from S3
 - Implemented automatic restart logic for model-serving when checkpoint files are absent in S3
 - Authored model_training_dag: While data ingestion runs hourly, the sequence window (`SEQUENCE_WINDOW_HOURS`, default 72h) exhibits negligible input distribution shifts across intra-day retraining. Set training frequency to daily execution (03:00 UTC, post daily ingestion accumulation)
 - Built MVP dashboard using Streamlit (migration to React planned for Phase 3; user-friendly UI/UX design pending)<br>
-  Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}
+  Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}, explicitly mapping 404 and 422 (insufficient snapshots) responses to separate error messages
 
-### 2026-09-01 ~ 2026-09-02
+#### 2026-09-01 ~ 2026-09-02
 - Produced Streamlit dashboard demon video
 - Done with the README for Phase 1
 - Published Phase 1 pre-release
@@ -178,36 +196,50 @@ Under design..
 
 ### Directory
 ```
-├── .venv/...                  # (excluded from GitHub)
-├── assets/...                 # README images
-├── dags/                      # (excluded from GitHub)
-│   ├── ingestion_dag.py       # DAG for Space-Track TLE ingestion & preprocessing
-│   └── model_training_dag.py  # DAG for LSTM Autoencoder model training
-├── dashboard/                 # temporary MVP UI consuming serve.py HTTP API
-│   ├── requirements.txt       # dashboard dependencies
-│   └── streamlit_app.py       # Streamlit app
+├── .github/                      # GitHub Actions CI/CD automation
+│   └── workflows/
+│       └── deploy-model.yml
+├── .venv/...                     # (excluded from GitHub)
+├── assets/...                    # README images
+├── dags/                         # (excluded from GitHub)
+│   ├── ingestion_dag.py          # DAG for Space-Track TLE ingestion & preprocessing
+│   └── model_training_dag.py     # DAG for LSTM Autoencoder model training
+├── dashboard/                    # temporary MVP UI consuming serve.py HTTP API
+│   ├── requirements.txt          # dashboard dependencies
+│   └── streamlit_app.py          # Streamlit app
 ├── data-prepare/
-│   ├── Dockerfile             # container image for ingestion/preprocessing
-│   ├── ingestion.py           # catalog ingestion, validation, storage
-│   ├── preprocessing.py       # coordinate transformation, validation, orbital element variations, proximity screening
-│   └── requirements.txt       # ingestion/preprocessing dependencies
-├── model/                     # shared directory containing feature logic for training & serving
-│   ├── Dockerfile             # container image for training/serving
-│   ├── model.py               # LSTM Autoencoder architecture definition
-│   ├── requirements.txt       # training/serving dependencies
-│   ├── sequence_builder.py    # per-object windowing, gap handling (excluded from GitHub)
-│   ├── serve.py               # FastAPI inference serving
-│   ├── torch_dataset.py       # padding & masking
-│   └── train.py               # sequence construction, model training, W&B logging
-├── .env                       # environment variables
-├── .env.example               # template for environment variables
+│   ├── Dockerfile                # container image for ingestion/preprocessing
+│   ├── ingestion.py              # catalog ingestion, validation, storage
+│   ├── preprocessing.py          # coordinate transformation, validation, orbital element variations, proximity screening
+│   └── requirements.txt          # ingestion/preprocessing dependencies
+├── k8s/                          # Kubernetes Manifest
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.yaml.example
+│   ├── 03-deployment.yaml
+│   ├── 04-service.yaml
+│   └── 05-hpa.yaml
+├── model/                        # shared directory containing feature logic for training & serving
+│   ├── Dockerfile                # container image for training/serving
+│   ├── model.py                  # LSTM Autoencoder architecture definition
+│   ├── requirements.txt          # training/serving dependencies
+│   ├── sequence_builder.py       # per-object windowing, gap handling (excluded from GitHub)
+│   ├── serve.py                  # FastAPI inference serving
+│   ├── torch_dataset.py          # padding & masking
+│   └── train.py                  # sequence construction, model training, W&B logging
+├── scripts/                      # Deployment automation scripts
+│   └── deploy/
+│       ├── check_and_rollout.py
+│       └── requirements.txt
+├── .env                          # environment variables
+├── .env.example                  # template for environment variables
 ├── .gitignore
-├── docker-compose.yml         # (excluded from GitHub)
-├── Dockerfile.airflow         # custom Airflow container image
-├── pyproject.toml             # project configuration & dependencies
+├── docker-compose.yml            # (excluded from GitHub)
+├── Dockerfile.airflow            # custom Airflow container image
+├── pyproject.toml                # project configuration & dependencies
 ├── README_KR.md
 ├── README.md
-└── uv.lock                    # dependency lock file
+└── uv.lock                       # dependency lock file
 ```
 
 ---

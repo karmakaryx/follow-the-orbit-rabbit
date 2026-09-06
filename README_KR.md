@@ -37,8 +37,9 @@
 - **W&B:** Experiment Tracking & Performance Monitoring
 - **MLflow:** Model Registry
 - **FastAPI:** Inference Serving
-- **Minikube:** Kubernetes Cluster (Local Alternative to EKS)
-- **GitHub Actions:** CI/CD Deployment
+- **Minikube:** Local Kubernetes Cluster (EKS Alternative)
+- **AWS Lambda:** Serverless Event Trigger
+- **GitHub Actions:** CI/CD Pipeline
 - **Amazon SQS:** Message Queue
 - **Streamlit:** Dashboard
 
@@ -48,6 +49,7 @@
 ### STEP 1. [수집] Data Ingestion (Airflow)
 - Space-Track REST API 호출
 - 관심 발사체·위성군(eg. Starlink, LEO 우주쓰레기)의 TLE 전체 카탈로그(약 35,000건)를 주기적으로 증분 수집
+- 퇴역일이 존재하지 않는 활성화 건만 수집
 - 원본 json을 S3 raw 적재 (eg. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
 ### STEP 2. [전처리/가공] Preprocessing & Feature Engineering
@@ -79,19 +81,22 @@
 - 정상적인 TLE 시퀀스(eg. 지난 30일간의 연속된 궤도 변화 흐름)를 LSTM Autoencoder에 넣어서 "정상 궤도 변화 패턴"을 압축했다가 복원하는 법 학습
 - processed parquet load → 오래된 TLE 필터 → 시퀀스 구성 → 객체 기준 85/15 train/val split (data leakage 방지 처리) → 학습 → W&B logging
 - W&B가 무료 티어이므로 artifact storage 소모 없도록 checkpoint와 scaler는 S3 models/ 경로로 업로드하고 W&B에는 S3 key만 전송
+- DAG는 학습과 checkpoint 업로드까지만 책임지고 K8s rolling update로 처리
 
 ### STEP 4. [추론/서빙] Inference & Serving (FastAPI)
 - 모델 학습과 추론/서빙이 feature 로직(sequence_builder 등)을 그대로 공유하므로 같은 디렉토리 유지
 - FastAPI serving: 특정 NORAD ID 입력 시 NORAD ID의 궤도 이상 스코어(reconstruction loss) 반환
 - 위성이 갑자기 궤도를 급격히 이탈하거나 우주 쓰레기 충돌 위험 등으로 이상 궤도를 그리면, 모델이 이 패턴을 복원하지 못해 재구성 손실이 치솟게 되는데 이 오차 수치(loss) 자체를 궤도 이상 스코어(perturbation score)로 활용
-- 시작 시 S3에서 가장 최근 checkpoint를 자동으로 찾아 로드
+- serve.py는 시작 시에만 S3에서 가장 최근 checkpoint를 자동으로 찾아 로드하고 핫리로드 없음
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 → 윈도우 → feature 추출)으로 구성해 추론
 
-### STEP 5. Under development..
+### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
+- Under development..
 
 ---
 
 ## **💡 Insights from Trial and Error**
+> **PHASE 1:**
 - **[STEP 1]** 프로토타입에서는 EPOCH 필터링으로 최근 3일내 갱신된 객체 100건만 수집했으나 실제 활용을 위해 전체 카탈로그 수집으로 변경. 그러면 모든 pairwise 거리 계산은 조합 수가 억 단위라 brute force로는 불가능하므로 CelesTrak, SOCRATES같은 실제 충돌 스크리닝 시스템처럼 궤도 유사군(고도대/경사각 등)으로 1차 필터링하고 KDTree로 근접 후보만 빠르게 추출
 
 - **[STEP 2] 궤도 요소 기반 변동치**
@@ -120,27 +125,40 @@
 
 - **[STEP 3]** 모델 학습에서 객체 기준 split을 쓰는 이유: sequence_builder가 지금은 객체당 "최신 윈도우 1개"만 만들기 때문에 사실상 객체 하나 = 샘플 하나. 시간 기준으로 자르면 한 객체의 짧은 시퀀스를 더 쪼개는 셈이라 의미가 없어 객체를 통째로 train/val에 배정. 단 객체 단위로 먼저 train/val id를 나누고, scaler는 train 객체의 원본 df 값으로만 계산 (val 정보가 스케일링에 섞여 들어가는 leakage 방지)
 
+> **PHASE 2:**
+- 설계시 GitOps(ArgoCD 기반 자동화), Helm, Kustomize 도입을 고려했으나, 단일 모델 서빙 파이프라인 특성상 CI/CD 오버스펙으로 판단, 프로젝트의 체급과 용도에 안 맞아 제외
+
+---
+
+## 📊 MLOps Pipeline & Workflow Execution
+### 1. Experiment Logger
+![wandb1](./assets/wandb1.png)
+
+### 2. Actions & CI/CD Workflows
+![workflow1](./assets/workflow1.png)
+![workflow2](./assets/workflow2.png)
+
 ---
 
 ## **📜 Project Development Log**
-### 2026-08-19
+#### 2026-08-19
 - 프로젝트 착수: Inspired by Rocket Lab (HBO documentary "Wild Wild Space"를 본 뒤)
 - The Enid의 데뷔앨범을 듣다가 문득 떠오른 컨셉:<br>
   *"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
 - GitHub repository 설정
 
-### 2026-08-20 ~ 2026-08-21
+#### 2026-08-20 ~ 2026-08-21
 - Space-Track.org 가입
 - 개발 환경 구성 (WSL2, Docker, Airflow, etc.)
 - AWS S3 bucket 생성
 
-### 2026-08-22 ~ 2026-08-23
+#### 2026-08-22 ~ 2026-08-23
 - 프로젝트 아키텍처 설계
 - ingestion 스크립트 작성
 - 프로토타입 파이프라인 테스트 위해 최근 객체 100건만 수집하여 적재
 - Dockerfile 구현, 단일 실행 검증
 
-### 2026-08-24 ~ 2026-08-25
+#### 2026-08-24 ~ 2026-08-25
 - preprocessing 스크립트 작성 착수
 - 전처리 단계에 해당하는 규칙 기반 알고리즘 로직 작성 위해 도메인 지식 습득
 - uv run airflow standalone 테스트 확인
@@ -148,25 +166,25 @@
 - 전체 full catalog를 1시간 간격으로 수집하도록 스케줄링 테스트
 - 필수 필드 존재 여부 샘플 체크 (첫 레코드 기준)
 
-### 2026-08-26 ~ 2026-08-27
+#### 2026-08-26 ~ 2026-08-27
 - 전처리, FE 2차 개발: 결과 데이터 확인하며 디버깅
 - 심우주·달궤도 객체 필터링: ALT_KM > 50,000km 제외, GEO·HEO는 유지
 - BSTAR 항이 전체 `ORBITAL_DEVIATION_METRIC`를 100% 지배하는 문제 확인 (QIANFAN 계열에서 발견)
 
-### 2026-08-28 ~ 2026-08-29
+#### 2026-08-28 ~ 2026-08-29
 - AI 모델 개발 착수: S3에 전처리 완료된 parquet 파일 호출해 학습
 - W&B 설정: 학습 과정 및 hyperparameter/metric은 W&B로 자동 로깅, artifact는 S3로 이원화
 - LSTM Autoencoder val_loss 이상 급등 원인 디버깅: 극단치 138건의 이심률이 최대 0.0019로 전부 근원궤도였음
 - CORS 설정
 
-### 2026-08-30 ~ 2026-08-31
+#### 2026-08-30 ~ 2026-08-31
 - AI 모델 서빙 개발 착수: S3에 적재된 동일 timestamp 쌍의 checkpoint와 scaler 파일 호출해 사용
 - model-serving은 S3에 체크포인트 존재하지 않을 경우 재시작 하도록 개발
 - model_training_dag 작성: 수집(ingestion)은 시간당이지만, 학습 입력이 보는 `SEQUENCE_WINDOW_HOURS`(기본 72h) window 기준으로는 하루 여러 번 재학습해도 입력 분포 변화가 거의 없으므로 매일 1회(UTC 03:00, 하루치 수집이 누적된 이후)로 설정
 - Streamlit으로 MVP dashboard 작성 (Phase 3에서 React 전환 예정. 사용자 친화적인 부가기능 추가한 UI 설계 필요)<br>
-  FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만
+  FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만. 404, 422(스냅샷 부족) 응답을 각각 구분해서 에러 메시지로 노출
 
-### 2026-09-01 ~ 2026-09-02
+#### 2026-09-01 ~ 2026-09-02
 - Streamlit dashboard 데모 영상 제작
 - Phase 1 README 작성 완료
 - 개발 Phase 1 사전 배포
@@ -180,36 +198,50 @@ Under design..
 
 ### Directory
 ```
-├── .venv/...                  # (GitHub 관리 제외)
-├── assets/...                 # README images
-├── dags/                      # (GitHub 관리 제외)
-│   ├── ingestion_dag.py       # Space-Track TLE 수집 및 전처리 DAG
-│   └── model_training_dag.py  # LSTM Autoencoder 학습 DAG
-├── dashboard/                 # serve.py의 HTTP API만 호출하는 임시 MVP UI
-│   ├── requirements.txt       # dashboard dependencies
-│   └── streamlit_app.py       # Streamlit app
+├── .github/                      # GitHub Actions CI/CD 자동화 스크립트
+│   └── workflows/
+│       └── deploy-model.yml
+├── .venv/...                     # (GitHub 관리 제외)
+├── assets/...                    # README images
+├── dags/                         # (GitHub 관리 제외)
+│   ├── ingestion_dag.py          # Space-Track TLE 수집 및 전처리 DAG
+│   └── model_training_dag.py     # LSTM Autoencoder 학습 DAG
+├── dashboard/                    # serve.py의 HTTP API만 호출하는 임시 MVP UI
+│   ├── requirements.txt          # dashboard dependencies
+│   └── streamlit_app.py          # Streamlit app
 ├── data-prepare/
-│   ├── Dockerfile             # ingestion/preprocessing 컨테이너 이미지
-│   ├── ingestion.py           # 카탈로그 수집, 검증, 적재
-│   ├── preprocessing.py       # 좌표변환, 검증, 궤도 변동치, 근접 스크리닝
-│   └── requirements.txt       # ingestion/preprocessing dependencies
-├── model/                     # 학습과 서빙이 feature 로직 공유
-│   ├── Dockerfile             # 학습/서빙 겸용 컨테이너 이미지
-│   ├── model.py               # LSTM Autoencoder 정의
-│   ├── requirements.txt       # training/serving dependencies
-│   ├── sequence_builder.py    # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
-│   ├── serve.py               # FastAPI inference serving
-│   ├── torch_dataset.py       # padding & masking
-│   └── train.py               # 시퀀스 구성, 학습, W&B logging
-├── .env                       # 실제 환경변수
-├── .env.example               # 환경변수 템플릿
+│   ├── Dockerfile                # ingestion/preprocessing 컨테이너 이미지
+│   ├── ingestion.py              # 카탈로그 수집, 검증, 적재
+│   ├── preprocessing.py          # 좌표변환, 검증, 궤도 변동치, 근접 스크리닝
+│   └── requirements.txt          # ingestion/preprocessing dependencies
+├── k8s/                          # Kubernetes Manifest
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.yaml.example
+│   ├── 03-deployment.yaml
+│   ├── 04-service.yaml
+│   └── 05-hpa.yaml
+├── model/                        # 학습과 서빙이 feature 로직 공유
+│   ├── Dockerfile                # 학습/서빙 겸용 컨테이너 이미지
+│   ├── model.py                  # LSTM Autoencoder 정의
+│   ├── requirements.txt          # training/serving dependencies
+│   ├── sequence_builder.py       # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
+│   ├── serve.py                  # FastAPI inference serving
+│   ├── torch_dataset.py          # padding & masking
+│   └── train.py                  # 시퀀스 구성, 학습, W&B logging
+├── scripts/                      # 배포 자동화 스크립트
+│   └── deploy/
+│       ├── check_and_rollout.py
+│       └── requirements.txt
+├── .env                          # 실제 환경변수
+├── .env.example                  # 환경변수 템플릿
 ├── .gitignore
-├── docker-compose.yml         # (GitHub 관리 제외)
-├── Dockerfile.airflow         # Airflow 이미지
-├── pyproject.toml             # 프로젝트 의존성 정의
+├── docker-compose.yml            # (GitHub 관리 제외)
+├── Dockerfile.airflow            # Airflow 이미지
+├── pyproject.toml                # 프로젝트 의존성 정의
 ├── README_KR.md
 ├── README.md
-└── uv.lock                    # 의존성 lock 파일
+└── uv.lock                       # 의존성 lock 파일
 ```
 
 ---
