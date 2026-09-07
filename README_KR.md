@@ -91,7 +91,19 @@
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 → 윈도우 → feature 추출)으로 구성해 추론
 
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
-- Under development..
+**1. Minikube**
+- 로컬 클러스터에 Deployment + Service + HPA manifest로 모델 서빙 환경 구성
+- readiness/liveness/startup probe는 /health 엔드포인트 사용
+- 로컬 빌드된 ftor-model:v1 이미지를 직접 참조하며, 별도의 원격 레지스트리 push 없이 Uvicorn 서빙 실행
+- CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신
+- Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
+- HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
+
+**2. GitHub Actions**
+- GitHub 기본 제공 러너(cloud-hosted)는 로컬 minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
+- GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 workflow_dispatch 실행 가능
+- Airflow는 정책상 K8s 배포에 관여하지 않으며, 완전히 독립된 스크립트가 GitHub Actions 스케줄로 동작해 S3의 최신 checkpoint와 현재 Deployment를 비교한 뒤, 변경사항이 있으면 annotation을 patch하여 Pod template diff를 만들어 이미지 재빌드 없이 rolling restart trigger
+- rollout이 timeout 안에 성공하지 못하면 이전 revision으로 자동 롤백
 
 ---
 
@@ -126,7 +138,16 @@
 - **[STEP 3]** 모델 학습에서 객체 기준 split을 쓰는 이유: sequence_builder가 지금은 객체당 "최신 윈도우 1개"만 만들기 때문에 사실상 객체 하나 = 샘플 하나. 시간 기준으로 자르면 한 객체의 짧은 시퀀스를 더 쪼개는 셈이라 의미가 없어 객체를 통째로 train/val에 배정. 단 객체 단위로 먼저 train/val id를 나누고, scaler는 train 객체의 원본 df 값으로만 계산 (val 정보가 스케일링에 섞여 들어가는 leakage 방지)
 
 > **PHASE 2:**
-- 설계시 GitOps(ArgoCD 기반 자동화), Helm, Kustomize 도입을 고려했으나, 단일 모델 서빙 파이프라인 특성상 CI/CD 오버스펙으로 판단, 프로젝트의 체급과 용도에 안 맞아 제외
+- **[STEP 5]** 설계시 GitOps(ArgoCD 기반 자동화), Helm, Kustomize 도입을 고려했으나, 단일 모델 서빙 파이프라인 특성상 CI/CD 오버스펙으로 판단, 프로젝트의 체급과 용도에 안 맞아 제외
+
+- **[STEP 5]** memory limit을 처음에 2Gi로 잡았다가 OOMKilled 발생. 실측하니 안정 상태 기준 ~2821Mi 소비 중이었고, 캐시 TTL 갱신 시점 메모리가 순간적으로 더 튀는 걸 확인해 여유를 두고 3.5Gi로 상향
+
+- **[STEP 5]** 배포 직후 readinessProbe가 계속 실패해서 Pod가 Ready로 안 넘어가는 문제 발생. serve.py가 S3에서 checkpoint를 다운로드하는 동안 이미 liveness/readiness probe가 돌기 시작해 타임아웃으로 재시작을 반복하고 있었음. startupProbe를 별도로 추가해 초기 로딩 시간을 넉넉히 기다려주고, 그 이후부터 liveness/readiness가 넘겨받도록 분리
+
+- **[STEP 5]** maxUnavailable: 0 / maxSurge: 1 설정으로 새 Pod가 Ready 될 때까지 기존 Pod가 트래픽을 계속 처리하는걸 확인해 replicas=1인 상태로도 무중단 배포 가능
+
+- **[STEP 5]** 처음엔 정기적 polling(crontab) 방식을 사용했으나, GHA 스케줄러는 배송 시간을 절대 안 지키는 미친 택배기사와 같아 배포 파이프라인이 수 시간씩 지연되는 현상 발생. GitHub 내부 스케줄러의 queue 병목은 고질적이라 (정시성을 보장하지 않음을 공식 문서에서 명시) 배치 스케줄링 방식은 폐기. AWS Lambda 기반의 event-driven push 배포 파이프라인으로 전환하여, 모델이 S3에 업로드되는 즉시 배포가 실행되도록 개선 (MLOps 자동화 차원에서도 이상적)<br>
+다만 이 과정에서 GitHub 문제인지 트래킹하느라 default branch도 바꿔보고 정각 병목시간 고려해 crontab 시간도 28분처럼 분 단위로 애매하게 변경해보고 온갖 로그 뒤지고 별 삽질을 다했다.. GHA schedule은 상용 환경에서는 절대 못 쓰는 걸로..
 
 ---
 
@@ -189,6 +210,19 @@
 - Phase 1 README 작성 완료
 - 개발 Phase 1 사전 배포
 - 개발 Phase 2 개발 착수
+- minikube 설치, 배포, HPA 부하 테스트 완료
+
+#### 2026-09-03 ~ 2026-09-04
+- Airflow Triggerer 제외
+- Rollout 스크립트 작성
+- Self-hosted runner 등록 (GitHub Actions 상시 대기 상태)
+- workflow_dispatch 수동 실행 테스트 완료
+
+#### 2026-09-05 ~ 2026-09-08
+- Actions runner 배포 crontab 테스트
+- GHA cron 실행 방식을 AWS Lambda 기반으로 변경
+- MSGQ 설계
+- Phase 2 README 작성
 
 ---
 
