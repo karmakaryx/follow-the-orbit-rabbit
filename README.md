@@ -90,8 +90,26 @@
 - Automatically fetches and loads the latest checkpoint from S3 upon startup (no hot reloading)
 - Upon request, aggregates recent processed snapshots from S3 (with caching enabled) and constructs target sequences using the exact same pipeline as training (stale TLE filter → windowing → feature extraction) for inference.
 
+### [Interim Status] Docker Compose Services
+- `ftor-ingestion`: Build-only container; used as a sibling container via DockerOperator.
+- `ftor-model`: Build-only container; utilized by the ftor_model_training DAG.
+- `model-training`: Executed automatically on a daily schedule via the ftor_model_training DAG (manual execution is reserved for local debugging/testing).
+- `model-serving`: Always-on daemon listening on port 8000; isolated from Airflow orchestration.
+
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
-- Under development..
+**1. Minikube**
+- Configured the model serving environment on a local cluster using Deployment, Service, and HPA manifests.
+- Used the /health endpoint for readiness, liveness, and startup probes.
+- Directly references the locally built ftor-model:v1 image, running Uvicorn serving without pushing to a remote registry.
+- Patching the Deployment annotation in CI triggers a rolling restart, updating to the latest model with zero downtime.
+- The Service exposes only the cluster-internal network via ClusterIP (external access via Ingress is planned for future phases).
+- HPA (HorizontalPodAutoscaler) automatically scales replicas based on a 70% CPU target utilization.
+
+**2. GitHub Actions**
+- Since GitHub-hosted default runners cannot access the local Minikube kubectl context, registered a self-hosted runner directly on the host machine to maintain an always-on deployment agent.
+- Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual workflow_dispatch execution.
+- By architectural design, Airflow does not handle K8s deployments; instead, an independent script runs via GitHub Actions schedule to compare the latest checkpoint in S3 with the active Deployment. Upon detecting changes, it patches annotations to produce a Pod template diff, triggering a zero-downtime rolling restart without rebuilding images.
+- Automatically rolls back to the previous revision if the rollout fails to succeed within the timeout window.
 
 ---
 
@@ -124,7 +142,17 @@
 - **[STEP 3]** Object-Based Data Splitting: Since sequence_builder currently generates "one latest window" per object, one object effectively corresponds to one sample. Time-based splitting would further fragment short single-object sequences arbitrarily. Splitting is therefore performed at the object level across train/val sets. Scalers are computed exclusively on raw DataFrames from training objects to prevent data leakage from validation sets.
 
 > **PHASE 2:**
-- Evaluated GitOps (ArgoCD-based automation), Helm, and Kustomize during initial design, but deemed them over-engineered for a single model-serving pipeline. Excluded as they exceed the current scope and purpose of the project.
+- **[STEP 5]** Evaluated GitOps (ArgoCD-based automation), Helm, and Kustomize during initial design, but deemed them over-engineered for a single model-serving pipeline. Excluded as they exceed the current scope and purpose of the project.
+
+- **[STEP 5]** Initially configured the memory limit to 2Gi, which resulted in OOMKilled errors. Empirical measurements indicated steady-state consumption around ~2,821 MiB, with temporary memory spikes during cache TTL refreshes. Adjusted the memory limit to 3.5Gi to provide adequate headroom.
+
+- **[STEP 5]** Encountered an issue immediately after deployment where readinessProbe failed continuously, preventing the Pod from transitioning to the Ready state. Liveness and readiness probes were initiating while serve.py was downloading checkpoints from S3, causing timeout-driven restart loops. Introduced a dedicated startupProbe to accommodate initial loading latencies before handing health checking over to liveness and readiness probes.
+
+- **[STEP 5]** Configured maxUnavailable: 0 and maxSurge: 1, ensuring active Pods continue serving incoming traffic until new Pods achieve Ready status, enabling zero-downtime deployments even with replicas=1.
+
+- **[STEP 5]** Initially, I used regular polling via crontab, but the GHA scheduler turned out to be like a batshit crazy FedEx driver who treats delivery times as mere suggestions, causing the deployment pipeline to get delayed by hours. Turns out GitHub's internal scheduler queue bottleneck is a chronic disease (they even admit in the official docs that punctuality isn't guaranteed), so I ditched the batch scheduling approach. Switched to an AWS Lambda-based event-driven push pipeline, so the deployment kicks off the exact second the model gets dumped into S3 (which is way more legit for MLOps automation anyway).<br>
+Though, during the debugging process, I did all kinds of dumb bullshit to trace if it was a GitHub bug, changing the default branch, tweaking crontab to weird-ass minutes like :28 to dodge peak-hour bottlenecks, digging through mountain-high logs..<br>
+TL;DR: Don't use GHA schedules for production.
 
 ---
 
@@ -187,6 +215,19 @@
 - Done with the README for Phase 1
 - Published Phase 1 pre-release
 - Initiated Phase 2 development
+- Completed Minikube installation, deployment, and HPA load testing
+
+#### 2026-09-03 ~ 2026-09-04
+- Excluded Airflow Triggerer
+- Authored rollout automation scripts
+- Registered self-hosted runner (maintaining an active state for GitHub Actions)
+- Verified manual execution tests via workflow_dispatch
+
+#### 2026-09-05 ~ 2026-09-08
+- Tested crontab scheduling for Actions runner deployment
+- Migrated execution trigger from GHA cron scheduling to AWS Lambda event-driven push
+- Designed message queue (MSGQ) architecture
+- Authored Phase 2 README documentation
 
 ---
 

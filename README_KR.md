@@ -90,6 +90,12 @@
 - serve.py는 시작 시에만 S3에서 가장 최근 checkpoint를 자동으로 찾아 로드하고 핫리로드 없음
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 → 윈도우 → feature 추출)으로 구성해 추론
 
+### [중간점검] Docker Compose 현황
+- `ftor-ingestion`: 빌드 전용, DockerOperator가 sibling container로 씀
+- `ftor-model`: 빌드 전용, ftor_model_training DAG가 이 이미지를 사용
+- `model-training`: ftor_model_training DAG를 통해 매일 자동 실행됨 (수동 training은 로컬 테스트용으로만 필요시 사용)
+- `model-serving`: 상시 서비스, port 8000, Airflow 대상 아님
+
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
 **1. Minikube**
 - 로컬 클러스터에 Deployment + Service + HPA manifest로 모델 서빙 환경 구성
