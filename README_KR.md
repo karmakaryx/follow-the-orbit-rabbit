@@ -101,12 +101,13 @@
 - 로컬 클러스터에 Deployment + Service + HPA manifest로 모델 서빙 환경 구성
 - readiness/liveness/startup probe는 /health 엔드포인트 사용
 - 로컬 빌드된 ftor-model:v1 이미지를 직접 참조하며, 별도의 원격 레지스트리 push 없이 Uvicorn 서빙 실행
-- CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신
+- CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신 (새 Pod Ready 이후에 구 Pod Terminating 되는 로그로 확인됨)
 - Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
 - HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
 
 **2. GitHub Actions**
 - GitHub 기본 제공 러너(cloud-hosted)는 로컬 minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
+- 클러스터 접근 권한은 현재 본인 머신의 로컬 kubeconfig 권한으로 실행됨. 향후 GitHub repo에 협업자 추가시 workflow를 통해 Secrets 값이나 권한이 유출될 수 있는 점 인지하고 관리 필요
 - GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 workflow_dispatch 실행 가능
 - Airflow는 정책상 K8s 배포에 관여하지 않으며, 완전히 독립된 스크립트가 GitHub Actions 스케줄로 동작해 S3의 최신 checkpoint와 현재 Deployment를 비교한 뒤, 변경사항이 있으면 annotation을 patch하여 Pod template diff를 만들어 이미지 재빌드 없이 rolling restart trigger
 - rollout이 timeout 안에 성공하지 못하면 이전 revision으로 자동 롤백
@@ -145,6 +146,10 @@
 
 > **PHASE 2:**
 - **[STEP 5]** 설계시 GitOps(ArgoCD 기반 자동화), Helm, Kustomize 도입을 고려했으나, 단일 모델 서빙 파이프라인 특성상 CI/CD 오버스펙으로 판단, 프로젝트의 체급과 용도에 안 맞아 제외
+
+- **[STEP 5]** S3_BUCKET_NAME은 버킷명이 알려지면 private이어도 거부된(403) 요청 자체에 S3 request 과금 발생 가능하기 때문에 ConfigMap(평문 커밋)이 아니라 Secret(CLI로만 클러스터에 주입, 파일 커밋 안 함)에 배치. 별도로 S3 요청 급증 CloudWatch 알람 설정 예정
+
+- **[STEP 5]** load_processed_snapshots 함수가 parquet 전체 컬럼을 읽어오면서 불필요한 TLE 문자열(69x2) 및 ECI/ECEF/LLA 좌표계 등 서빙에 안 쓰는 컬럼까지 메모리에 적재되는 문제 발견. 서빙에 필요한 핵심 컬럼(NORAD_CAT_ID, OBJECT_NAME, EPOCH 등)만 필터링해 읽도록 `REQUIRED_SNAPSHOT_COLS`를 지정하여 model-serving Pod의 반복적인 OOMKilled 방지. print() 버퍼링 때문에 OOMKilled 직전 로그가 안 보여서 PYTHONUNBUFFERED=1 추가
 
 - **[STEP 5]** memory limit을 처음에 2Gi로 잡았다가 OOMKilled 발생. 실측하니 안정 상태 기준 ~2821Mi 소비 중이었고, 캐시 TTL 갱신 시점 메모리가 순간적으로 더 튀는 걸 확인해 여유를 두고 3.5Gi로 상향
 

@@ -101,12 +101,13 @@
 - Configured the model serving environment on a local cluster using Deployment, Service, and HPA manifests.
 - Used the /health endpoint for readiness, liveness, and startup probes.
 - Directly references the locally built ftor-model:v1 image, running Uvicorn serving without pushing to a remote registry.
-- Patching the Deployment annotation in CI triggers a rolling restart, updating to the latest model with zero downtime.
+- Patching the Deployment annotation in CI triggers a rolling restart, updating to the latest model with zero downtime. (Verified via cluster logs showing the new Pod reaching Ready status prior to the old Pod entering Terminating)
 - The Service exposes only the cluster-internal network via ClusterIP (external access via Ingress is planned for future phases).
 - HPA (HorizontalPodAutoscaler) automatically scales replicas based on a 70% CPU target utilization.
 
 **2. GitHub Actions**
 - Since GitHub-hosted default runners cannot access the local Minikube kubectl context, registered a self-hosted runner directly on the host machine to maintain an always-on deployment agent.
+- Cluster access privileges currently run on the local kubeconfig credentials of the host machine. Be aware that adding collaborators to the GitHub repository in the future poses security risks regarding potential leakage of Secrets or credentials via workflows, requiring careful access management.
 - Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual workflow_dispatch execution.
 - By architectural design, Airflow does not handle K8s deployments; instead, an independent script runs via GitHub Actions schedule to compare the latest checkpoint in S3 with the active Deployment. Upon detecting changes, it patches annotations to produce a Pod template diff, triggering a zero-downtime rolling restart without rebuilding images.
 - Automatically rolls back to the previous revision if the rollout fails to succeed within the timeout window.
@@ -143,6 +144,10 @@
 
 > **PHASE 2:**
 - **[STEP 5]** Evaluated GitOps (ArgoCD-based automation), Helm, and Kustomize during initial design, but deemed them over-engineered for a single model-serving pipeline. Excluded as they exceed the current scope and purpose of the project.
+
+- **[STEP 5]** Placed S3_BUCKET_NAME in Kubernetes Secrets (injected into the cluster via CLI, excluded from version control) rather than ConfigMap (plaintext commits). Even for private buckets, exposed bucket names can incur costs from denied HTTP 403 request spikes. Additionally, set up a CloudWatch alarm to monitor sudden surges in S3 request volume.
+
+- **[STEP 5]** Identified an issue where load_processed_snapshots read all parquet columns, loading unused metadata like redundant 69x2 TLE strings and ECI/ECEF/LLA coordinate frames into memory. Defined `REQUIRED_SNAPSHOT_COLS` to filter and load only essential inference columns (NORAD_CAT_ID, OBJECT_NAME, EPOCH, etc.), preventing recurrent OOMKilled crashes on the model-serving Pod. Added PYTHONUNBUFFERED=1 to ensure pre-crash stdout logs are flushed immediately without stdout buffering.
 
 - **[STEP 5]** Initially configured the memory limit to 2Gi, which resulted in OOMKilled errors. Empirical measurements indicated steady-state consumption around ~2,821 MiB, with temporary memory spikes during cache TTL refreshes. Adjusted the memory limit to 3.5Gi to provide adequate headroom.
 
