@@ -1,7 +1,7 @@
 ![banner_ftor](./assets/banner_ftor.jpg)
 
 <div align="center">
-  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, W&B, Kubernetes and FastAPI</h3>
+  <h3>Space-Track TLE Data Pipeline & Collision Avoidance MLOps System using Airflow, MLflow, Kubernetes and FastAPI</h3>
 </div>
 
 ## **🎥 Feature Highlights**
@@ -30,14 +30,18 @@
 
 ### Tech Stack
 > 💡 **Note:** Additional specs and components are currently under design.
-- **Airflow** (Data Pipeline & Orchestration)
-- **S3** (Data Lake & Artifact Storage)
-- **PyTorch Lightning** (Model Training)
-- **W&B** (Experiment Tracking & Monitoring)
-- **FastAPI** (Inference Serving)
-- **Minikube** (Alternative to EKS for K8s)
-- **GitHub Actions** (CI/CD Deployment)
-- **Streamlit** (Dashboard)
+- **Airflow:** Data Pipeline & Automated Orchestration
+- **S3:** Data Lake & Artifact Storage
+- **Docker:** Task-Isolated Experimentation Infrastructure
+- **PyTorch Lightning:** Model Training
+- **W&B:** Experiment Tracking & Performance Monitoring
+- **MLflow:** Model Registry
+- **FastAPI:** Inference Serving
+- **Minikube:** Local Kubernetes Cluster (EKS Alternative)
+- **AWS Lambda:** Serverless Event Trigger
+- **GitHub Actions:** CI/CD Pipeline
+- **Amazon SQS:** Message Queue
+- **Streamlit:** Dashboard
 
 ---
 
@@ -45,6 +49,7 @@
 ### STEP 1. [수집] Data Ingestion (Airflow)
 - Poll Space-Track REST API.
 - Periodically perform incremental ingestion of the full TLE catalog (~35,000 objects) for launch vehicles and satellite constellations of interest (e.g. Starlink, LEO space debris).
+- Collect active objects only ((where decay date is empty)
 - Store raw JSON in S3 (e.g. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
 ### STEP 2. [전처리/가공] Preprocessing & Feature Engineering
@@ -76,19 +81,41 @@
 - Input normal TLE sequences (e.g. continuous orbital trajectories over the past 30 days) into the LSTM Autoencoder to learn compressed representations and reconstructions of normal orbital perturbation patterns.
 - Load processed Parquet files → Filter outdated TLEs → Construct sequences → Perform object-based 85/15 train/val split (preventing data leakage) → Train → Log to W&B
 - To avoid consuming W&B artifact storage on the free tier, model checkpoints and scalers are uploaded to s3://models/, while logging only the corresponding S3 keys to W&B.
+- The DAG handles training and checkpoint upload, leaving deployment to K8s rolling updates
 
 ### STEP 4. [추론/서빙] Inference & Serving (FastAPI)
 - Training and inference share identical directory structures and feature extraction logic (sequence_builder and so on).
 - FastAPI Serving: Accepts a target NORAD ID and returns its orbital anomaly score (reconstruction loss)
 - If a satellite undergoes a sudden trajectory deviation or anomalous orbit due to collision risks, the model fails to reconstruct the pattern, causing reconstruction loss to spike. This loss value is directly used as the perturbation score.
-- Automatically locates and loads the latest model checkpoint from S3 upon startup.
+- Automatically fetches and loads the latest checkpoint from S3 upon startup (no hot reloading)
 - Upon request, aggregates recent processed snapshots from S3 (with caching enabled) and constructs target sequences using the exact same pipeline as training (stale TLE filter → windowing → feature extraction) for inference.
 
-### STEP 5. Under development..
+### [Interim Status] Docker Compose Services
+- `ftor-ingestion`: Build-only container; used as a sibling container via DockerOperator.
+- `ftor-model`: Build-only container; utilized by the ftor_model_training DAG.
+- `model-training`: Executed automatically on a daily schedule via the ftor_model_training DAG (manual execution is reserved for local debugging/testing).
+- `model-serving`: Always-on daemon listening on port 8000; isolated from Airflow orchestration.
+
+### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
+**1. Minikube**
+- Configured the model serving environment on a local cluster using Deployment, Service, and HPA manifests.
+- Used the /health endpoint for readiness, liveness, and startup probes.
+- Directly references the locally built ftor-model:v1 image, running Uvicorn serving without pushing to a remote registry.
+- Patching the Deployment annotation in CI triggers a rolling restart, updating to the latest model with zero downtime. (Verified via cluster logs showing the new Pod reaching Ready status prior to the old Pod entering Terminating)
+- The Service exposes only the cluster-internal network via ClusterIP (external access via Ingress is planned for future phases).
+- HPA (HorizontalPodAutoscaler) automatically scales replicas based on a 70% CPU target utilization.
+
+**2. GitHub Actions**
+- Since GitHub-hosted default runners cannot access the local Minikube kubectl context, registered a self-hosted runner directly on the host machine to maintain an always-on deployment agent.
+- Cluster access privileges currently run on the local kubeconfig credentials of the host machine. Be aware that adding collaborators to the GitHub repository in the future poses security risks regarding potential leakage of Secrets or credentials via workflows, requiring careful access management.
+- Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual workflow_dispatch execution.
+- By architectural design, Airflow does not handle K8s deployments; instead, an independent script runs via GitHub Actions schedule to compare the latest checkpoint in S3 with the active Deployment. Upon detecting changes, it patches annotations to produce a Pod template diff, triggering a zero-downtime rolling restart without rebuilding images.
+- Automatically rolls back to the previous revision if the rollout fails to succeed within the timeout window.
 
 ---
 
 ## **💡 Insights from Trial and Error**
+> **PHASE 1:**
 - **[STEP 1]** In the prototype, ingestion was limited to 100 recently updated objects within 3 days. Switched to full catalog ingestion for production readiness. Consequently, calculating pairwise distances across hundreds of millions of combinations became computationally infeasible via brute force. Adopted a two-stage approach similar to real-world operational systems (e.g. CelesTrak, SOCRATES): primary filtering by orbital similarity groups (altitude, inclination), followed by KDTree spatial indexing for fast proximity candidate extraction.
 
 - **[STEP 2] Orbital Element Variations**
@@ -115,27 +142,54 @@
 
 - **[STEP 3]** Object-Based Data Splitting: Since sequence_builder currently generates "one latest window" per object, one object effectively corresponds to one sample. Time-based splitting would further fragment short single-object sequences arbitrarily. Splitting is therefore performed at the object level across train/val sets. Scalers are computed exclusively on raw DataFrames from training objects to prevent data leakage from validation sets.
 
+> **PHASE 2:**
+- **[STEP 5]** Evaluated GitOps (ArgoCD-based automation), Helm, and Kustomize during initial design, but deemed them over-engineered for a single model-serving pipeline. Excluded as they exceed the current scope and purpose of the project.
+
+- **[STEP 5]** Placed S3_BUCKET_NAME in Kubernetes Secrets (injected into the cluster via CLI, excluded from version control) rather than ConfigMap (plaintext commits). Even for private buckets, exposed bucket names can incur costs from denied HTTP 403 request spikes. Additionally, set up a CloudWatch alarm to monitor sudden surges in S3 request volume.
+
+- **[STEP 5]** Identified an issue where load_processed_snapshots read all parquet columns, loading unused metadata like redundant 69x2 TLE strings and ECI/ECEF/LLA coordinate frames into memory. Defined `REQUIRED_SNAPSHOT_COLS` to filter and load only essential inference columns (NORAD_CAT_ID, OBJECT_NAME, EPOCH, etc.), preventing recurrent OOMKilled crashes on the model-serving Pod. Added PYTHONUNBUFFERED=1 to ensure pre-crash stdout logs are flushed immediately without stdout buffering.
+
+- **[STEP 5]** Initially configured the memory limit to 2Gi, which resulted in OOMKilled errors. Empirical measurements indicated steady-state consumption around ~2,821 MiB, with temporary memory spikes during cache TTL refreshes. Adjusted the memory limit to 3.5Gi to provide adequate headroom.
+
+- **[STEP 5]** Encountered an issue immediately after deployment where readinessProbe failed continuously, preventing the Pod from transitioning to the Ready state. Liveness and readiness probes were initiating while serve.py was downloading checkpoints from S3, causing timeout-driven restart loops. Introduced a dedicated startupProbe to accommodate initial loading latencies before handing health checking over to liveness and readiness probes.
+
+- **[STEP 5]** Configured maxUnavailable: 0 and maxSurge: 1, ensuring active Pods continue serving incoming traffic until new Pods achieve Ready status, enabling zero-downtime deployments even with replicas=1.
+
+- **[STEP 5]** Initially, I used regular polling via crontab, but the GHA scheduler turned out to be like a batshit crazy FedEx driver who treats delivery times as mere suggestions, causing the deployment pipeline to get delayed by hours. Turns out GitHub's internal scheduler queue bottleneck is a chronic disease (they even admit in the official docs that punctuality isn't guaranteed), so I ditched the batch scheduling approach. Switched to an AWS Lambda-based event-driven push pipeline, so the deployment kicks off the exact second the model gets dumped into S3 (which is way more legit for MLOps automation anyway).<br>
+Though, during the debugging process, I did all kinds of dumb bullshit to trace if it was a GitHub bug, changing the default branch, tweaking crontab to weird-ass minutes like :28 to dodge peak-hour bottlenecks, digging through mountain-high logs..<br>
+TL;DR: Don't use GHA schedules for production.
+
+---
+
+## 📊 MLOps Pipeline & Workflow Execution
+### 1. Experiment Logger
+![wandb1](./assets/wandb1.png)
+
+### 2. Actions & CI/CD Workflows
+![workflow1](./assets/workflow1.png)
+![workflow2](./assets/workflow2.png)
+
 ---
 
 ## **📜 Project Development Log**
-### 2026-08-19
+#### 2026-08-19
 - Project Kickoff: Inspired by Rocket Lab (after watching the HBO documentary "Wild Wild Space")
 - Came up with a concept while listening to The Enid's debut album:<br>
   *"In the region of the summer stars💫, follow the white rabbit..🐇 into the orbital debris zone.✨"*
 - Set up GitHub repository
 
-### 2026-08-20 ~ 2026-08-21
+#### 2026-08-20 ~ 2026-08-21
 - Signed up for Space-Track.org
 - Configured local development environment (WSL2, Docker, Airflow, etc.)
 - Created AWS S3 bucket
 
-### 2026-08-22 ~ 2026-08-23
+#### 2026-08-22 ~ 2026-08-23
 - Designed project architecture
 - Authored ingestion scripts
 - Ingested 100 recent objects for prototype pipeline testing
 - Implemented Dockerfile and verified standalone execution
 
-### 2026-08-24 ~ 2026-08-25
+#### 2026-08-24 ~ 2026-08-25
 - Started preprocessing script development
 - Acquired domain knowledge to build rule-based algorithm logic for preprocessing
 - Verified local execution via uv run airflow standalone
@@ -143,23 +197,45 @@
 - Configured scheduled test runs for hourly full-catalog ingestion
 - Performed sample schema validation on mandatory fields against initial records
 
-### 2026-08-26 ~ 2026-08-27
+#### 2026-08-26 ~ 2026-08-27
 - Conducted the 2nd Preprocessing & Feature Engineering development; debugged outputs against transformed data
 - Deep Space & Lunar Orbit Filtering: Excluded objects with ALT_KM > 50,000km while maintaining GEO/HEO objects
 - Identified issue where the BSTAR feature dominated 100% of the composite `ORBITAL_DEVIATION_METRIC` (observed in QIANFAN series)
 
-### 2026-08-28 ~ 2026-08-29
+#### 2026-08-28 ~ 2026-08-29
 - Initiated ML model development: Fetched preprocessed parquet files from S3 for training pipelines
 - W&B Setup: Configured automated logging for training runs, hyperparameters, and metrics via W&B, while decoupling artifact storage to S3
 - Debugged val_loss spikes in LSTM Autoencoder: Identified 138 extreme outlier cases where eccentricity was $\le 0.0019$ (near-circular orbits)
 - Configured CORS settings
 
-### 2026-08-30 ~ 2026-08-31
+#### 2026-08-30 ~ 2026-08-31
 - Started model serving implementation: Loaded corresponding timestamped checkpoint and scaler pairs from S3
 - Implemented automatic restart logic for model-serving when checkpoint files are absent in S3
 - Authored model_training_dag: While data ingestion runs hourly, the sequence window (`SEQUENCE_WINDOW_HOURS`, default 72h) exhibits negligible input distribution shifts across intra-day retraining. Set training frequency to daily execution (03:00 UTC, post daily ingestion accumulation)
 - Built MVP dashboard using Streamlit (migration to React planned for Phase 3; user-friendly UI/UX design pending)<br>
-  Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}
+  Directly calls FastAPI (serve.py) endpoints: /health, /score/{norad_cat_id}, explicitly mapping 404 and 422 (insufficient snapshots) responses to separate error messages
+
+#### 2026-09-01 ~ 2026-09-02
+- Produced Streamlit dashboard demon video
+- Done with the README for Phase 1
+- Published Phase 1 pre-release
+- Initiated Phase 2 development
+- Completed Minikube installation, deployment, and HPA load testing
+
+#### 2026-09-03 ~ 2026-09-04
+- Excluded Airflow Triggerer
+- Authored rollout automation scripts
+- Registered self-hosted runner (maintaining an active state for GitHub Actions)
+- Verified manual execution tests via workflow_dispatch
+
+#### 2026-09-05 ~ 2026-09-08
+- Tested crontab scheduling for Actions runner deployment
+- Migrated execution trigger from GHA cron scheduling to AWS Lambda event-driven push
+- Designed message queue (MSGQ) architecture
+- Authored Phase 2 README documentation
+
+#### 2026-09-09 ~ 2026-09-12
+- Development disrupted by the corruption of journalism.. (DM for drama 🍿)
 
 ---
 
@@ -169,36 +245,50 @@ Under design..
 
 ### Directory
 ```
-├── .venv/...                  # (excluded from GitHub)
-├── assets/...                 # README images
-├── dags/                      # (excluded from GitHub)
-│   ├── ingestion_dag.py       # DAG for Space-Track TLE ingestion & preprocessing
-│   └── model_training_dag.py  # DAG for LSTM Autoencoder model training
-├── dashboard/                 # temporary MVP UI consuming serve.py HTTP API
-│   ├── requirements.txt       # dashboard dependencies
-│   └── streamlit_app.py       # Streamlit app
+├── .github/                      # GitHub Actions CI/CD automation
+│   └── workflows/
+│       └── deploy-model.yml
+├── .venv/...                     # (excluded from GitHub)
+├── assets/...                    # README images
+├── dags/                         # (excluded from GitHub)
+│   ├── ingestion_dag.py          # DAG for Space-Track TLE ingestion & preprocessing
+│   └── model_training_dag.py     # DAG for LSTM Autoencoder model training
+├── dashboard/                    # temporary MVP UI consuming serve.py HTTP API
+│   ├── requirements.txt          # dashboard dependencies
+│   └── streamlit_app.py          # Streamlit app
 ├── data-prepare/
-│   ├── Dockerfile             # container image for ingestion/preprocessing
-│   ├── ingestion.py           # catalog ingestion, validation, storage
-│   ├── preprocessing.py       # coordinate transformation, validation, orbital element variations, proximity screening
-│   └── requirements.txt       # ingestion/preprocessing dependencies
-├── model/                     # shared directory containing feature logic for training & serving
-│   ├── Dockerfile             # container image for training/serving
-│   ├── model.py               # LSTM Autoencoder architecture definition
-│   ├── requirements.txt       # training/serving dependencies
-│   ├── sequence_builder.py    # per-object windowing, gap handling (excluded from GitHub)
-│   ├── serve.py               # FastAPI inference serving
-│   ├── torch_dataset.py       # padding & masking
-│   └── train.py               # sequence construction, model training, W&B logging
-├── .env                       # environment variables
-├── .env.example               # template for environment variables
+│   ├── Dockerfile                # container image for ingestion/preprocessing
+│   ├── ingestion.py              # catalog ingestion, validation, storage
+│   ├── preprocessing.py          # coordinate transformation, validation, orbital element variations, proximity screening
+│   └── requirements.txt          # ingestion/preprocessing dependencies
+├── k8s/                          # Kubernetes Manifest
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.yaml.example
+│   ├── 03-deployment.yaml
+│   ├── 04-service.yaml
+│   └── 05-hpa.yaml
+├── model/                        # shared directory containing feature logic for training & serving
+│   ├── Dockerfile                # container image for training/serving
+│   ├── model.py                  # LSTM Autoencoder architecture definition
+│   ├── requirements.txt          # training/serving dependencies
+│   ├── sequence_builder.py       # per-object windowing, gap handling (excluded from GitHub)
+│   ├── serve.py                  # FastAPI inference serving
+│   ├── torch_dataset.py          # padding & masking
+│   └── train.py                  # sequence construction, model training, W&B logging
+├── scripts/                      # Deployment automation scripts
+│   └── deploy/
+│       ├── check_and_rollout.py
+│       └── requirements.txt
+├── .env                          # environment variables
+├── .env.example                  # template for environment variables
 ├── .gitignore
-├── docker-compose.yml         # (excluded from GitHub)
-├── Dockerfile.airflow         # custom Airflow container image
-├── pyproject.toml             # project configuration & dependencies
+├── docker-compose.yml            # (excluded from GitHub)
+├── Dockerfile.airflow            # custom Airflow container image
+├── pyproject.toml                # project configuration & dependencies
 ├── README_KR.md
 ├── README.md
-└── uv.lock                    # dependency lock file
+└── uv.lock                       # dependency lock file
 ```
 
 ---

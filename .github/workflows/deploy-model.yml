@@ -1,0 +1,32 @@
+name: Deploy Latest Model Checkpoint
+
+on:
+  schedule:
+    - cron: "28 15 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: model-deploy
+  cancel-in-progress: false
+
+jobs:
+  check-and-rollout:
+    runs-on: [self-hosted, minikube]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify kubectl access
+        run: kubectl get nodes
+
+      - name: Install script dependencies
+        run: pip3 install --break-system-packages -r scripts/deploy/requirements.txt
+
+      - name: Check for new checkpoint and roll out if needed
+        env:
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+          MODEL_S3_PREFIX: models/
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: python3 scripts/deploy/check_and_rollout.py

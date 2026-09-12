@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-serving
+  namespace: ftor
+  labels:
+    app: model-serving
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: model-serving
+  template:
+    metadata:
+      labels:
+        app: model-serving
+      annotations:
+        ftor.io/checkpoint-key: "unset"
+    spec:
+      containers:
+        - name: model-serving
+          image: ftor-model:v1
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: model-serving-config
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: S3_BUCKET_NAME
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_REGION
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1.5Gi
+            limits:
+              cpu: "1"
+              memory: 3.5Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
