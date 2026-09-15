@@ -104,9 +104,11 @@
 - Patching the Deployment annotation in CI triggers a rolling restart, updating to the latest model with zero downtime. (Verified via cluster logs showing the new Pod reaching Ready status prior to the old Pod entering Terminating)
 - The Service exposes only the cluster-internal network via ClusterIP (external access via Ingress is planned for future phases).
 - HPA (HorizontalPodAutoscaler) automatically scales replicas based on a 70% CPU target utilization.
+- Empirical HPA Verification: Triggered an infinite request loop, driving CPU utilization up from 1% to over 400% and confirming automatic scaling from 1 to 3 replicas. Upon removing the load, CPU usage dropped immediately, but scale-down from 3 to 1 replicas occurred only after the stabilization window (~5 mins) elapsed—confirming expected behavior designed to prevent aggressive replica flapping.
 
 **2. GitHub Actions**
 - Since GitHub-hosted default runners cannot access the local Minikube kubectl context, registered a self-hosted runner directly on the host machine to maintain an always-on deployment agent.
+- Registered as a systemd service using svc.sh and verified its active (running) status.
 - Cluster access privileges currently run on the local kubeconfig credentials of the host machine. Be aware that adding collaborators to the GitHub repository in the future poses security risks regarding potential leakage of Secrets or credentials via workflows, requiring careful access management.
 - Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual workflow_dispatch execution.
 - By architectural design, Airflow does not handle K8s deployments; instead, an independent script runs via GitHub Actions schedule to compare the latest checkpoint in S3 with the active Deployment. Upon detecting changes, it patches annotations to produce a Pod template diff, triggering a zero-downtime rolling restart without rebuilding images.
@@ -154,6 +156,10 @@
 - **[STEP 5]** Encountered an issue immediately after deployment where readinessProbe failed continuously, preventing the Pod from transitioning to the Ready state. Liveness and readiness probes were initiating while serve.py was downloading checkpoints from S3, causing timeout-driven restart loops. Introduced a dedicated startupProbe to accommodate initial loading latencies before handing health checking over to liveness and readiness probes.
 
 - **[STEP 5]** Configured maxUnavailable: 0 and maxSurge: 1, ensuring active Pods continue serving incoming traffic until new Pods achieve Ready status, enabling zero-downtime deployments even with replicas=1.
+
+- **[STEP 5]** Resolved missing .NET Core 6.0 dependencies (e.g. libicu) during runner installation by executing installdependencies.sh.
+
+- **[STEP 5]** The systemd service (svc.sh) does not inherit interactive shell PATH settings (e.g. .bashrc). Binaries installed via apt in standard system paths prove significantly more stable in CI service environments than toolchains reliant on custom PATH configurations such as uv.
 
 - **[STEP 5]** Initially, I used regular polling via crontab, but the GHA scheduler turned out to be like a batshit crazy FedEx driver who treats delivery times as mere suggestions, causing the deployment pipeline to get delayed by hours. Turns out GitHub's internal scheduler queue bottleneck is a chronic disease (they even admit in the official docs that punctuality isn't guaranteed), so I ditched the batch scheduling approach. Switched to an AWS Lambda-based event-driven push pipeline, so the deployment kicks off the exact second the model gets dumped into S3 (which is way more legit for MLOps automation anyway).<br>
 Though, during the debugging process, I did all kinds of dumb bullshit to trace if it was a GitHub bug, changing the default branch, tweaking crontab to weird-ass minutes like :28 to dodge peak-hour bottlenecks, digging through mountain-high logs..<br>
@@ -220,7 +226,7 @@ TL;DR: Don't use GHA schedules for production.
 - Done with the README for Phase 1
 - Published Phase 1 pre-release
 - Initiated Phase 2 development
-- Completed Minikube installation, deployment, and HPA load testing
+- Completed Minikube installation, deployment, and HPA load testing (busybox loop)
 
 #### 2026-09-03 ~ 2026-09-04
 - Excluded Airflow Triggerer
@@ -234,8 +240,8 @@ TL;DR: Don't use GHA schedules for production.
 - Designed message queue (MSGQ) architecture
 - Authored Phase 2 README documentation
 
-#### 2026-09-09 ~ 2026-09-12
-- Development disrupted by the corruption of journalism.. (DM for drama 🍿)
+#### 2026-09-15 ~
+- Prevent failure when attempting to mount a path that exists only inside the container in a Docker-out-of-Docker (DooD) environment.
 
 ---
 

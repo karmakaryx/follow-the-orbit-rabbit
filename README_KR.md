@@ -104,9 +104,11 @@
 - CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신 (새 Pod Ready 이후에 구 Pod Terminating 되는 로그로 확인됨)
 - Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
 - HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
+- HPA 실측 검증: busybox pod로 무한 요청 루프 걸어서 CPU 1% → 400%대 상승, replica 1→3 자동 스케일업 확인. 부하 제거 후 CPU 즉시 떨어져도 stabilization window(~5분) 지나서야 3→1 스케일다운되는 것도 확인 (급격한 replica 요동 방지용 정상 설계)
 
 **2. GitHub Actions**
 - GitHub 기본 제공 러너(cloud-hosted)는 로컬 minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
+- svc.sh로 systemd 서비스 등록하고 active (running) 확인
 - 클러스터 접근 권한은 현재 본인 머신의 로컬 kubeconfig 권한으로 실행됨. 향후 GitHub repo에 협업자 추가시 workflow를 통해 Secrets 값이나 권한이 유출될 수 있는 점 인지하고 관리 필요
 - GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 workflow_dispatch 실행 가능
 - Airflow는 정책상 K8s 배포에 관여하지 않으며, 완전히 독립된 스크립트가 GitHub Actions 스케줄로 동작해 S3의 최신 checkpoint와 현재 Deployment를 비교한 뒤, 변경사항이 있으면 annotation을 patch하여 Pod template diff를 만들어 이미지 재빌드 없이 rolling restart trigger
@@ -156,6 +158,10 @@
 - **[STEP 5]** 배포 직후 readinessProbe가 계속 실패해서 Pod가 Ready로 안 넘어가는 문제 발생. serve.py가 S3에서 checkpoint를 다운로드하는 동안 이미 liveness/readiness probe가 돌기 시작해 타임아웃으로 재시작을 반복하고 있었음. startupProbe를 별도로 추가해 초기 로딩 시간을 넉넉히 기다려주고, 그 이후부터 liveness/readiness가 넘겨받도록 분리
 
 - **[STEP 5]** maxUnavailable: 0 / maxSurge: 1 설정으로 새 Pod가 Ready 될 때까지 기존 Pod가 트래픽을 계속 처리하는걸 확인해 replicas=1인 상태로도 무중단 배포 가능
+
+- **[STEP 5]** runner 설치 시 .NET Core 6.0 의존성(libicu 등) 누락되어 installdependencies.sh로 조치
+
+- **[STEP 5]** systemd 서비스(svc.sh)는 interactive shell PATH(.bashrc 등)를 안 물려받음. PATH 의존적인 도구(uv 등)보다 apt 설치 표준 경로 바이너리가 CI 서비스 환경에 더 안정적
 
 - **[STEP 5]** 처음엔 정기적 polling(crontab) 방식을 사용했으나, GHA 스케줄러는 배송 시간을 절대 안 지키는 미친 택배기사와 같아 배포 파이프라인이 수 시간씩 지연되는 현상 발생. GitHub 내부 스케줄러의 queue 병목은 고질적이라 (정시성을 보장하지 않음을 공식 문서에서 명시) 배치 스케줄링 방식은 폐기. AWS Lambda 기반의 event-driven push 배포 파이프라인으로 전환하여, 모델이 S3에 업로드되는 즉시 배포가 실행되도록 개선 (MLOps 자동화 차원에서도 이상적)<br>
 다만 이 과정에서 GitHub 문제인지 트래킹하느라 default branch도 바꿔보고 정각 병목시간 고려해 crontab 시간도 28분처럼 분 단위로 애매하게 변경해보고 온갖 로그 뒤지고 별 삽질을 다했다.. GHA schedule은 상용 환경에서는 절대 못 쓰는 걸로..
@@ -221,7 +227,7 @@
 - Phase 1 README 작성 완료
 - 개발 Phase 1 사전 배포
 - 개발 Phase 2 개발 착수
-- minikube 설치, 배포, HPA 부하 테스트 완료
+- minikube 설치, 배포, HPA 부하 테스트 완료 (busybox loop)
 
 #### 2026-09-03 ~ 2026-09-04
 - Airflow Triggerer 제외
@@ -235,8 +241,8 @@
 - MSGQ 설계
 - Phase 2 README 작성
 
-#### 2026-09-09 ~ 2026-09-12
-- 저널리즘 타락으로 인해 방해받은 개발 진행.. (DM for drama 🍿)
+#### 2026-09-15 ~
+- docker.sock DooD 구조에서 호스트에 없는 컨테이너 내부 경로를 마운트하려다 실패하는 문제 방지
 
 ---
 
