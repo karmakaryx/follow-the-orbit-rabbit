@@ -28,11 +28,12 @@ def find_latest_checkpoint_key(bucket: str, prefix: str) -> str:
 
 
 def get_current_annotation() -> str | None:
+    escaped_key = ANNOTATION_KEY.replace(".", r"\.")
     result = subprocess.run(
         [
             "kubectl", "get", "deployment", DEPLOYMENT,
             "-n", NAMESPACE,
-            "-o", f"jsonpath={{.spec.template.metadata.annotations.{ANNOTATION_KEY}}}",
+            "-o", f"jsonpath={{.spec.template.metadata.annotations['{escaped_key}']}}",
         ],
         capture_output=True, text=True, check=True,
     )
