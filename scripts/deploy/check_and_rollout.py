@@ -12,7 +12,7 @@ DEPLOYMENT = os.getenv("K8S_DEPLOYMENT", "model-serving")
 ANNOTATION_KEY = "ftor.io/checkpoint-key"
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 MODEL_S3_PREFIX = os.getenv("MODEL_S3_PREFIX", "models/")
-ROLLOUT_TIMEOUT = os.getenv("ROLLOUT_TIMEOUT", "180s")
+ROLLOUT_TIMEOUT = os.getenv("ROLLOUT_TIMEOUT", "300s")
 
 
 def find_latest_checkpoint_key(bucket: str, prefix: str) -> str:
@@ -35,8 +35,12 @@ def get_current_annotation() -> str | None:
             "-n", NAMESPACE,
             "-o", f"jsonpath={{.spec.template.metadata.annotations['{escaped_key}']}}",
         ],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        # check=True는 stderr를 삼키므로 직접 출력
+        print(f"❌ kubectl get deployment failed: {result.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
     value = result.stdout.strip()
     return value or None
 
