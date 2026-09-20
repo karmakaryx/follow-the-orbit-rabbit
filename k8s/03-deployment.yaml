@@ -49,11 +49,11 @@ spec:
                 secretKeyRef:
                   name: aws-credentials
                   key: S3_BUCKET_NAME
-            - name: AWS_REGION
+            - name: AWS_DEFAULT_REGION
               valueFrom:
                 secretKeyRef:
                   name: aws-credentials
-                  key: AWS_REGION
+                  key: AWS_DEFAULT_REGION
           resources:
             requests:
               cpu: 250m
