@@ -29,19 +29,19 @@
 - 예측 기간 제한: SGP4/TLE 특성상 오차가 누적되므로, 향후 3~7일 이내의 단기 충돌 위험 1차 경보에 초점을 맞춤
 
 ### Tech Stack
-> 💡 **Note:** Additional specs and components are currently under design.
-- **Airflow:** Data Pipeline & Automated Orchestration
-- **S3:** Data Lake & Artifact Storage
-- **Docker:** Task-Isolated Experimentation Infrastructure
-- **PyTorch Lightning:** Model Training
-- **W&B:** Experiment Tracking & Performance Monitoring
-- **MLflow:** Model Registry
-- **FastAPI:** Inference Serving
-- **Minikube:** Local Kubernetes Cluster (EKS Alternative)
-- **AWS Lambda:** Serverless Event Trigger
-- **GitHub Actions:** CI/CD Pipeline
-- **Amazon SQS:** Message Queue
-- **Streamlit:** Dashboard
+- **Data Pipeline & Orchestration:** Airflow
+- **Data Lake & Artifact Storage:** S3
+- **Task-Isolated Infrastructure:** Docker
+- **Model Training:** PyTorch Lightning
+- **Experiment Tracking:** W&B
+- **Model Registry:** MLflow
+- **Inference Serving:** FastAPI
+- **Local Kubernetes Cluster:** Minikube (EKS Alternative)
+- **Serverless Event Trigger:** AWS Lambda
+- **CI/CD Pipeline:** GitHub Actions
+- **Dashboard:** Streamlit
+- **Message Queue:** Amazon SQS, Lambda, DynamoDB
+- **Notification Services:** Amazon SES, Slack Incoming Webhook
 
 ---
 
@@ -101,6 +101,7 @@
 - 로컬 클러스터에 Deployment + Service + HPA manifest로 모델 서빙 환경 구성
 - readiness/liveness/startup probe는 /health 엔드포인트 사용
 - 로컬 빌드된 ftor-model:v1 이미지를 직접 참조하며, 별도의 원격 레지스트리 push 없이 Uvicorn 서빙 실행
+- 이미지는 호스트에서 한 번만 빌드하고 `minikube image load`로 복사해서 사용. 학습(Airflow)과 서빙(K8s)이 항상 동일한 이미지를 쓰도록 보장
 - CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신 (새 Pod Ready 이후에 구 Pod Terminating 되는 로그로 확인됨)
 - Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
 - HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
@@ -113,6 +114,12 @@
 - GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 workflow_dispatch 실행 가능
 - Airflow는 정책상 K8s 배포에 관여하지 않으며, 완전히 독립된 스크립트가 GitHub Actions 스케줄로 동작해 S3의 최신 checkpoint와 현재 Deployment를 비교한 뒤, 변경사항이 있으면 annotation을 patch하여 Pod template diff를 만들어 이미지 재빌드 없이 rolling restart trigger
 - rollout이 timeout 안에 성공하지 못하면 이전 revision으로 자동 롤백
+
+**3. AWS Lambda (Event-Driven Push Automation)**
+- Airflow 학습 완료 후 S3 models/ 경로에 새 체크포인트 파일이 업로드되면 `ftor-s3-trigger` Lambda 함수가 이를 즉시 감지
+- Lambda가 GitHub REST API를 통해 repository의 workflow_dispatch 이벤트를 호출하여 CI/CD 배포 workflow를 자동 트리거
+- 호스트의 Self-hosted Actions runner가 이 요청을 수신하여 check_and_rollout.py 배포 스크립트 실행
+- S3의 최신 체크포인트와 현재 Deployment를 비교해 변경사항 발생 시 K8s Deployment annotation을 patch하여 Minikube 클러스터의 Rolling Restart 수행
 
 ---
 
@@ -159,12 +166,23 @@
 
 - **[STEP 5]** maxUnavailable: 0 / maxSurge: 1 설정으로 새 Pod가 Ready 될 때까지 기존 Pod가 트래픽을 계속 처리하는걸 확인해 replicas=1인 상태로도 무중단 배포 가능
 
-- **[STEP 5]** runner 설치 시 .NET Core 6.0 의존성(libicu 등) 누락되어 installdependencies.sh로 조치
-
 - **[STEP 5]** systemd 서비스(svc.sh)는 interactive shell PATH(.bashrc 등)를 안 물려받음. PATH 의존적인 도구(uv 등)보다 apt 설치 표준 경로 바이너리가 CI 서비스 환경에 더 안정적
+
+- **[STEP 5]** `ftor-s3-trigger` Lambda 초기 배포 시 Handler 설정 오류로 `Runtime.HandlerNotFound` 발생. Runtime settings에서 Handler를 `lambda_function.handler`로 수정하여 해결. 이후 콘솔에서 .ckpt와 .json suffix 트리거 2개를 등록하는 과정에서 두 번째 트리거가 동일한 Statement ID로 Lambda resource policy를 덮어써서 .json 이벤트에 대한 invoke 권한이 누락되는 문제도 함께 발견하여 `aws lambda add-permission`으로 별도 Statement ID를 가진 권한을 추가하여 해결
+
+- **[STEP 5]** `ftor-s3-trigger`는 두 suffix에 각각 독립적인 S3 event trigger가 걸려있어, 두 파일이 시간차 없이(실측상 train.py의 실제 업로드 간격은 1초 미만) 거의 동시에 올라오면 두 이벤트가 서로 다른 Lambda 컨테이너로 병렬 처리되면서 각자 상대 파일이 이미 존재한다고 판단해 둘 다 독립적으로 workflow_dispatch를 호출하는 현상 확인 (실측: 동시 업로드 시 14ms 간격으로 별도 cold start 2회 발생, 둘 다 "Checkpoint pair confirmed" 로그 출력). 반면 업로드 간격이 수십 초 이상 충분히 벌어지면 먼저 온 이벤트는 "Pair not complete yet"으로 skip되고 나중 이벤트만 dispatch되어 1번만 실행됨.<br>
+다만 check_and_rollout.py가 annotation 비교로 멱등적으로 동작하므로, 중복 호출되어도 실제 재배포나 데이터 손상으로는 이어지지 않고 두 번째 Actions 실행은 "Already up to date"로 조기 종료됨. 근본 해결책(.json suffix 트리거만 남기고 .ckpt suffix 트리거 제거 등)은 존재하나, Phase 3에서 MLflow로 배포 트리거 체계를 예정이라 당장은 조치하지 않고 알려진 특성으로만 기록
 
 - **[STEP 5]** 처음엔 정기적 polling(crontab) 방식을 사용했으나, GHA 스케줄러는 배송 시간을 절대 안 지키는 미친 택배기사와 같아 배포 파이프라인이 수 시간씩 지연되는 현상 발생. GitHub 내부 스케줄러의 queue 병목은 고질적이라 (정시성을 보장하지 않음을 공식 문서에서 명시) 배치 스케줄링 방식은 폐기. AWS Lambda 기반의 event-driven push 배포 파이프라인으로 전환하여, 모델이 S3에 업로드되는 즉시 배포가 실행되도록 개선 (MLOps 자동화 차원에서도 이상적)<br>
 다만 이 과정에서 GitHub 문제인지 트래킹하느라 default branch도 바꿔보고 정각 병목시간 고려해 crontab 시간도 28분처럼 분 단위로 애매하게 변경해보고 온갖 로그 뒤지고 별 삽질을 다했다.. GHA schedule은 상용 환경에서는 절대 못 쓰는 걸로..
+
+- **[STEP 5]** GPU를 사용하지 않는데 CUDA 빌드가 통째로 설치되고 있어서 ftor-model 이미지가 디스크를 10.1GB나 차지하고 있었음. CPU 전용 wheel로 교체해 2.49GB로 감소. minikube 디스크, 빌드 시간, 이미지 전송 시간 모두 절감
+
+- **[STEP 5]** requirements가 미고정이라 재빌드 시점마다 버전이 달라질 수 있었음 (실제로 uv.lock의 pandas 3.0.5와 이미지의 3.0.6 불일치 확인). preprocessing이 쓴 parquet을 학습/서빙이 읽으므로 ftor-ingestion, ftor-model 두 이미지의 pandas/pyarrow/numpy 버전 고정. numpy는 uv.lock에 Python 버전별 마커로 2개가 존재해 컨테이너 기준(3.11) 버전을 pyproject에 명시해 단일화
+
+- **[STEP 5]** 시작 시 checkpoint 로드에 더해 processed parquet(최대 6일치 파티션)을 S3에서 내려받아 캐시를 채우므로, startupProbe 예산과 `ROLLOUT_TIMEOUT`을 실측 기준으로 상향. 예산이 짧으면 startupProbe kill loop나 정상 기동 중인 롤아웃의 오탐 롤백이 발생하므로 콜드 스타트 시간에 여유를 둠
+
+- **[STEP 5]** minikube를 재생성하면 인증서와 API 서버 포트가 바뀌어 runner가 쓰는 kubeconfig가 stale해질 수 있으므로, 재생성 후 workflow_dispatch로 kubectl 접근 검증
 
 ---
 
@@ -241,8 +259,23 @@
 - MSGQ 설계
 - Phase 2 README 작성
 
-#### 2026-09-15 ~
+#### 2026-09-15 ~ 2026-09-18
 - docker.sock DooD 구조에서 호스트에 없는 컨테이너 내부 경로를 마운트하려다 실패하는 문제 방지
+- annotation key에 점(.)이 포함되어 jsonpath가 경로 구분자로 오인, 항상 None을 반환해 멱등성 체크가 무력화되고 매 실행마다 불필요한 재배포가 발생하던 버그: escape 추가로 해결
+- check_and_rollout.py의 print 로그와 kubectl 출력 순서 뒤섞임 방지 처리
+- `ftor-s3-trigger` Lambda 배포 및 디버깅 완료
+- 데이터 파이프라인 10일 공백 이후 재수집 초기 구간에서 `DEVIATION_LOOKBACK_HOURS`(24h) 기준 참조 스냅샷 부재로 학습용 시퀀스 부족 현상 확인. 재개 후 24h 경과 시점부터 정상화 예상
+- processed 데이터 TTL은 수집 주기를 고려하여 15분에서 45분으로 조정, 근본 해결은 이벤트 기반 무효화로 예정
+
+#### 2026-09-19 ~ 2026-09-22
+- Airflow UI 로그아웃 후 자동 재로그인 문제 해결: Dockerfile.airflow의 `apache-airflow-providers-fab` 고정 때문에 Airflow가 3.1.8로 내려가 있었고, 로그아웃 시 _token 쿠키가 삭제되지 않았음. 버전 고정을 제거하고 재빌드해 Airflow 3.3.1 + FAB 3.8.0으로 정상화
+- 개발 환경 완전 초기화(docker/minikube 이미지, 볼륨, 캐시 전체 삭제) 후 재구성
+- ftor-model 이미지를 CPU 전용 torch로 교체
+- pandas/pyarrow/numpy 버전 고정 및 두 이미지 간 일치 확인
+- minikube 리소스 재산정(cpus=4 memory=6144), HPA maxReplicas 2로 조정
+- startupProbe/`ROLLOUT_TIMEOUT` 상향, check_and_rollout.py kubectl 오류 출력 개선
+- AWS SES Production Access 승인 요청 및 도메인(DKIM) 인증 완료
+- Phase 3 개발 착수: 범위 결정
 
 ---
 
@@ -275,6 +308,9 @@ Under design..
 │   ├── 03-deployment.yaml
 │   ├── 04-service.yaml
 │   └── 05-hpa.yaml
+├── lambda/
+│   ├── alert_notifier.py         # SQS 충돌 후보 알림 발송
+│   └── s3_trigger.py             # S3 event trigger
 ├── model/                        # 학습과 서빙이 feature 로직 공유
 │   ├── Dockerfile                # 학습/서빙 겸용 컨테이너 이미지
 │   ├── model.py                  # LSTM Autoencoder 정의
