@@ -40,13 +40,18 @@
 - **Serverless Event Trigger:** AWS Lambda
 - **CI/CD Pipeline:** GitHub Actions
 - **Dashboard:** Streamlit
-- **Message Queue:** Amazon SQS, Lambda, DynamoDB
-- **Notification Services:** Amazon SES, Slack Incoming Webhook
+- **Message Queue:** Amazon SQS, SNS, Lambda, DynamoDB
+- **Notification Services:** Amazon SES, Slack Webhook
+
+### Execution Schedule
+- **수집:** 2시간마다 (Every 2 hours)
+- **학습:** 매일 12:00 KST (Daily)
+- **CI/CD:** 모델 등록 이벤트 발생 즉시 (Event-Triggered)
 
 ---
 
 ## **🎬 MLOps Scenario**
-### STEP 1. [수집] Data Ingestion (Airflow)
+### STEP 1. [수집] Data Ingestion (Airflow/S3)
 - Space-Track REST API 호출
 - 관심 발사체·위성군(eg. Starlink, LEO 우주쓰레기)의 TLE 전체 카탈로그(약 35,000건)를 주기적으로 증분 수집
 - 퇴역일이 존재하지 않는 활성화 건만 수집
@@ -83,12 +88,13 @@
 - W&B가 무료 티어이므로 artifact storage 소모 없도록 checkpoint와 scaler는 S3 models/ 경로로 업로드하고 W&B에는 S3 key만 전송
 - DAG는 학습과 checkpoint 업로드까지만 책임지고 K8s rolling update로 처리
 
-### STEP 4. [추론/서빙] Inference & Serving (FastAPI)
+### STEP 4. [추론/서빙] Inference & Serving (FastAPI/Streamlit)
 - 모델 학습과 추론/서빙이 feature 로직(sequence_builder 등)을 그대로 공유하므로 같은 디렉토리 유지
 - FastAPI serving: 특정 NORAD ID 입력 시 NORAD ID의 궤도 이상 스코어(reconstruction loss) 반환
 - 위성이 갑자기 궤도를 급격히 이탈하거나 우주 쓰레기 충돌 위험 등으로 이상 궤도를 그리면, 모델이 이 패턴을 복원하지 못해 재구성 손실이 치솟게 되는데 이 오차 수치(loss) 자체를 궤도 이상 스코어(perturbation score)로 활용
 - serve.py는 시작 시에만 S3에서 가장 최근 checkpoint를 자동으로 찾아 로드하고 핫리로드 없음
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 → 윈도우 → feature 추출)으로 구성해 추론
+- Streamlit으로 MVP dashboard 작성: FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만. 404, 422(스냅샷 부족) 응답을 각각 구분해서 에러 메시지로 노출
 
 ### [중간점검] Docker Compose 현황
 - `ftor-ingestion`: 빌드 전용, DockerOperator가 sibling container로 씀
@@ -105,10 +111,10 @@
 - CI에서 Deployment annotation을 patch하면 rolling restart가 트리거되어 무중단으로 최신 모델로 갱신 (새 Pod Ready 이후에 구 Pod Terminating 되는 로그로 확인됨)
 - Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
 - HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
-- HPA 실측 검증: busybox pod로 무한 요청 루프 걸어서 CPU 1% → 400%대 상승, replica 1→3 자동 스케일업 확인. 부하 제거 후 CPU 즉시 떨어져도 stabilization window(~5분) 지나서야 3→1 스케일다운되는 것도 확인 (급격한 replica 요동 방지용 정상 설계)
+- HPA 실측 검증: busybox pod로 무한 요청 루프 걸어서 CPU 1% → 400%대 상승, replica 1 → 3 자동 스케일업 확인. 부하 제거 후 CPU 즉시 떨어져도 stabilization window(~5분) 지나서야 3 → 1 스케일다운되는 것도 확인 (급격한 replica 요동 방지용 정상 설계)
 
 **2. GitHub Actions**
-- GitHub 기본 제공 러너(cloud-hosted)는 로컬 minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
+- GitHub 기본 제공 러너(cloud-hosted)는 로컬 Minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
 - svc.sh로 systemd 서비스 등록하고 active (running) 확인
 - 클러스터 접근 권한은 현재 본인 머신의 로컬 kubeconfig 권한으로 실행됨. 향후 GitHub repo에 협업자 추가시 workflow를 통해 Secrets 값이나 권한이 유출될 수 있는 점 인지하고 관리 필요
 - GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 workflow_dispatch 실행 가능
@@ -121,6 +127,14 @@
 - 호스트의 Self-hosted Actions runner가 이 요청을 수신하여 check_and_rollout.py 배포 스크립트 실행
 - S3의 최신 체크포인트와 현재 Deployment를 비교해 변경사항 발생 시 K8s Deployment annotation을 patch하여 Minikube 클러스터의 Rolling Restart 수행
 
+### STEP 6. [모니터링/알림] Monitoring & Event-Driven Notification (SQS/SES)
+- 알람 기준 설정 (MSGQ 임시 테스트용): 1차 screening에서 `CONJUNCTION_CANDIDATE=True`로 판정된 근접 후보를 실시간 알림 파이프라인으로 발행
+- preprocessing.py(producer)가 거리 오름차순 정렬 후 동일 실행 내 mutual pair 중복을 제거하고, 상위 `MAX_ALERTS_PER_RUN`건만 Amazon SQS에 발행 (screening 임계값 자체는 후보군을 넉넉히 모으는 1차 필터라 그대로 알림으로 내보내면 비현실적인 건수가 나옴)
+- SQS → Lambda(`ftor-alert-notifier`) 트리거로 consumer 실행: DynamoDB(`ftor-alert-history`)로 동일 NORAD 쌍 재알림을 TTL 기반 dedup window(기본 24h) 안에서 차단
+- DynamoDB(`ftor-subscribers`)에 구독자별 채널(email/slack) 설정을 저장해 알림 대상과 채널을 코드 밖에서 관리
+- 이메일은 Amazon SES로 구독자별 개별 발송, Slack은 Incoming Webhook으로 채널 단위 발송 (구독자 수와 무관하게 알림당 1회)
+- 실패 발송 대비 SQS DLQ(maxReceiveCount 기준 재시도 소진 시 격리) 구성
+
 ---
 
 ## **💡 Insights from Trial and Error**
@@ -128,7 +142,7 @@
 - **[STEP 1]** 프로토타입에서는 EPOCH 필터링으로 최근 3일내 갱신된 객체 100건만 수집했으나 실제 활용을 위해 전체 카탈로그 수집으로 변경. 그러면 모든 pairwise 거리 계산은 조합 수가 억 단위라 brute force로는 불가능하므로 CelesTrak, SOCRATES같은 실제 충돌 스크리닝 시스템처럼 궤도 유사군(고도대/경사각 등)으로 1차 필터링하고 KDTree로 근접 후보만 빠르게 추출
 
 - **[STEP 2] 궤도 요소 기반 변동치**
-  - 궤도 요소 (경사각/이심률/근지점인구각/승교점적경/평균운동/BSTAR) 기반 변화율: 스케줄링(1시간) 간격으로 비교했더니 35,052개 중 35,051개가 epoch 완전히 동일. TLE 데이터는 하루 2~4회 정도만 갱신됨을 확인 후 24시간전 스냅샷과 비교로 변경
+  - 궤도 요소 (경사각/이심률/근지점인구각/승교점적경/평균운동/BSTAR) 기반 변화율: 수집 스케줄링 간격으로 비교했더니 35,052개 중 35,051개가 epoch 완전히 동일. TLE 데이터는 하루 2~4회 정도만 갱신됨을 확인 후 24시간전 스냅샷과 비교로 변경
   - 항상 "가장 최근 이전 파일 1개 vs 현재" 2개만 비교하는데 매 실행마다 processed/ 전체 히스토리를 리스팅하고 있어서 오늘 + 어제 파티션만 리스팅하도록 변경하여 데이터가 쌓여도 조회 비용이 늘지 않게 유지
   - `DELTA_MEAN_MOTION_PER_HR`이 수백 단위로 튀는 사례 발견. dt_hours가 너무 작으면(수분~수초 단위) 나눗셈이 불안정해져서 정상적인 미세한 변화도 시간당 변화율로 환산하는 순간 비정상적으로 폭발할 수 있으므로 최소 간격 미만이면 변화율 계산 자체를 하지 않고 NaN 처리
 
@@ -176,13 +190,25 @@
 - **[STEP 5]** 처음엔 정기적 polling(crontab) 방식을 사용했으나, GHA 스케줄러는 배송 시간을 절대 안 지키는 미친 택배기사와 같아 배포 파이프라인이 수 시간씩 지연되는 현상 발생. GitHub 내부 스케줄러의 queue 병목은 고질적이라 (정시성을 보장하지 않음을 공식 문서에서 명시) 배치 스케줄링 방식은 폐기. AWS Lambda 기반의 event-driven push 배포 파이프라인으로 전환하여, 모델이 S3에 업로드되는 즉시 배포가 실행되도록 개선 (MLOps 자동화 차원에서도 이상적)<br>
 다만 이 과정에서 GitHub 문제인지 트래킹하느라 default branch도 바꿔보고 정각 병목시간 고려해 crontab 시간도 28분처럼 분 단위로 애매하게 변경해보고 온갖 로그 뒤지고 별 삽질을 다했다.. GHA schedule은 상용 환경에서는 절대 못 쓰는 걸로..
 
-- **[STEP 5]** GPU를 사용하지 않는데 CUDA 빌드가 통째로 설치되고 있어서 ftor-model 이미지가 디스크를 10.1GB나 차지하고 있었음. CPU 전용 wheel로 교체해 2.49GB로 감소. minikube 디스크, 빌드 시간, 이미지 전송 시간 모두 절감
+- **[STEP 5]** GPU를 사용하지 않는데 CUDA 빌드가 통째로 설치되고 있어서 ftor-model 이미지가 디스크를 10.1GB나 차지하고 있었음. CPU 전용 wheel로 교체해 2.49GB로 감소. Minikube 디스크, 빌드 시간, 이미지 전송 시간 모두 절감
 
 - **[STEP 5]** requirements가 미고정이라 재빌드 시점마다 버전이 달라질 수 있었음 (실제로 uv.lock의 pandas 3.0.5와 이미지의 3.0.6 불일치 확인). preprocessing이 쓴 parquet을 학습/서빙이 읽으므로 ftor-ingestion, ftor-model 두 이미지의 pandas/pyarrow/numpy 버전 고정. numpy는 uv.lock에 Python 버전별 마커로 2개가 존재해 컨테이너 기준(3.11) 버전을 pyproject에 명시해 단일화
 
 - **[STEP 5]** 시작 시 checkpoint 로드에 더해 processed parquet(최대 6일치 파티션)을 S3에서 내려받아 캐시를 채우므로, startupProbe 예산과 `ROLLOUT_TIMEOUT`을 실측 기준으로 상향. 예산이 짧으면 startupProbe kill loop나 정상 기동 중인 롤아웃의 오탐 롤백이 발생하므로 콜드 스타트 시간에 여유를 둠
 
-- **[STEP 5]** minikube를 재생성하면 인증서와 API 서버 포트가 바뀌어 runner가 쓰는 kubeconfig가 stale해질 수 있으므로, 재생성 후 workflow_dispatch로 kubectl 접근 검증
+- **[STEP 5]** Minikube를 재생성하면 인증서와 API 서버 포트가 바뀌어 runner가 쓰는 kubeconfig가 stale해질 수 있으므로, 재생성 후 workflow_dispatch로 kubectl 접근 검증
+
+- **[STEP 6]** boto3 SQS 클라이언트가 NoRegionError로 즉시 실패. 원인은 boto3가 AWS_REGION 환경변수를 읽지 않고 AWS_DEFAULT_REGION만 읽는다는 점. S3는 리전 미지정 시 글로벌 엔드포인트(us-east-1)로 요청 후 리다이렉트로 처리되어 그동안 드러나지 않았고, 리전형 서비스인 SQS는 fallback이 없어 이번에 처음 노출됨. 코드별로 region_name을 넘기는 대신 .env, K8s Secret/Deployment, GitHub Actions env의 AWS_REGION을 AWS_DEFAULT_REGION으로 통일해 근본 해결
+
+- **[STEP 6]** Lambda 함수 생성 시 기본 timeout(3s)을 그대로 두고 배포하여, DynamoDB dedup 조회 + SES 발송 + Slack HTTP 요청이 순차 실행되는 동안 타임아웃 발생. 30초로 상향 조정 후 해결
+
+- **[STEP 6]** 1차 screening 임계값(25km)이 원래 후보군을 넉넉히 모으는 용도였는데 이를 그대로 알림 트리거로 연결하자, 실측 기준 전체 35,212개 객체 중 18,916개(과반)가 후보로 잡혀 한 번의 실행에서 수백 건의 이메일·Slack 알림이 발송됨 (trigger를 급삭제해 472건 수준에서 겨우 차단!😭). Starlink 등 근접 군집 위성이 상시로 이 거리 안에 있는 게 원인이며 버그는 아니었음. 정밀 계산 필터링을 붙이기 전까지 임시 조치로, 거리 오름차순 상위 기본 3건만 발행하도록 producer에 제한을 둠
+
+- **[STEP 6]** consumer(Lambda)가 이메일 발송 실패 시 raise로 예외를 전파하고 있어, 구독자 여러 명 중 한 명이라도 실패하면 함수가 중단되고 dedup 기록(`_record_sent`)에 도달하지 못하는 구조였음. 그 상태로 SQS가 재시도하면 이미 성공한 구독자에게도 중복 발송되는 문제를 확인. 채널별 발송을 개별 try/except로 감싸 한쪽 실패가 다른 발송을 막지 않도록 수정하고, dedup 기록은 발송 성공/실패와 무관하게 항상 남기도록 변경
+
+- **[STEP 6]** Slack Webhook이 특정 채널 하나에 연결된 공유 리소스인데도 구독자 순회 루프 안에서 호출되고 있어, 구독자 수만큼 같은 메시지가 채널에 중복 게시될 수 있는 구조였음. 구독자 루프 밖으로 분리해 알림당 최대 1회만 발송하도록 수정 (이메일은 반대로 수신자 개념이라 개별 발송 유지)
+
+- **[STEP 6]** SES sandbox 모드에서 위 이슈로 인한 반복 발송 시도가 겹치며 일일 발송 한도(200통)를 짧은 시간에 소진, `Daily message quota exceeded` throttling 에러 확인. 도메인(DKIM) 인증 완료 후 Production Access 승인 요청 (하필 주말에 신청해서 이틀 넘게 대기 중.. AWS는 주말에 일 안하는군요.😅)
 
 ---
 
@@ -236,16 +262,15 @@
 #### 2026-08-30 ~ 2026-08-31
 - AI 모델 서빙 개발 착수: S3에 적재된 동일 timestamp 쌍의 checkpoint와 scaler 파일 호출해 사용
 - model-serving은 S3에 체크포인트 존재하지 않을 경우 재시작 하도록 개발
-- model_training_dag 작성: 수집(ingestion)은 시간당이지만, 학습 입력이 보는 `SEQUENCE_WINDOW_HOURS`(기본 72h) window 기준으로는 하루 여러 번 재학습해도 입력 분포 변화가 거의 없으므로 매일 1회(UTC 03:00, 하루치 수집이 누적된 이후)로 설정
-- Streamlit으로 MVP dashboard 작성 (Phase 3에서 React 전환 예정. 사용자 친화적인 부가기능 추가한 UI 설계 필요)<br>
-  FastAPI(serve.py)가 제공하는 /health, /score/{norad_cat_id} endpoint를 그대로 호출만. 404, 422(스냅샷 부족) 응답을 각각 구분해서 에러 메시지로 노출
+- model_training_dag 작성: 수집(ingestion)은 2시간마다지만, 학습 입력이 보는 `SEQUENCE_WINDOW_HOURS`(기본 72h) window 기준으로는 하루 여러 번 재학습해도 입력 분포 변화가 거의 없으므로 매일 1회(UTC 03:00, 하루치 수집이 누적된 이후)로 설정
+- MVP dashboard 작성 (Phase 3에서 React 전환 예정. 사용자 친화적인 부가기능 추가한 UI 설계 필요)
 
 #### 2026-09-01 ~ 2026-09-02
 - Streamlit dashboard 데모 영상 제작
 - Phase 1 README 작성 완료
 - 개발 Phase 1 사전 배포
 - 개발 Phase 2 개발 착수
-- minikube 설치, 배포, HPA 부하 테스트 완료 (busybox loop)
+- Minikube 설치, 배포, HPA 부하 테스트 완료 (busybox loop)
 
 #### 2026-09-03 ~ 2026-09-04
 - Airflow Triggerer 제외
@@ -267,14 +292,18 @@
 - 데이터 파이프라인 10일 공백 이후 재수집 초기 구간에서 `DEVIATION_LOOKBACK_HOURS`(24h) 기준 참조 스냅샷 부재로 학습용 시퀀스 부족 현상 확인. 재개 후 24h 경과 시점부터 정상화 예상
 - processed 데이터 TTL은 수집 주기를 고려하여 15분에서 45분으로 조정, 근본 해결은 이벤트 기반 무효화로 예정
 
-#### 2026-09-19 ~ 2026-09-22
+#### 2026-09-19 ~ 2026-09-20
 - Airflow UI 로그아웃 후 자동 재로그인 문제 해결: Dockerfile.airflow의 `apache-airflow-providers-fab` 고정 때문에 Airflow가 3.1.8로 내려가 있었고, 로그아웃 시 _token 쿠키가 삭제되지 않았음. 버전 고정을 제거하고 재빌드해 Airflow 3.3.1 + FAB 3.8.0으로 정상화
-- 개발 환경 완전 초기화(docker/minikube 이미지, 볼륨, 캐시 전체 삭제) 후 재구성
+- 개발 환경 완전 초기화(Docker/Minikube 이미지, 볼륨, 캐시 전체 삭제) 후 재구성
 - ftor-model 이미지를 CPU 전용 torch로 교체
 - pandas/pyarrow/numpy 버전 고정 및 두 이미지 간 일치 확인
-- minikube 리소스 재산정(cpus=4 memory=6144), HPA maxReplicas 2로 조정
+- Minikube 리소스 재산정(cpus=4 memory=6144), HPA maxReplicas 2로 조정
 - startupProbe/`ROLLOUT_TIMEOUT` 상향, check_and_rollout.py kubectl 오류 출력 개선
 - AWS SES Production Access 승인 요청 및 도메인(DKIM) 인증 완료
+
+#### 2026-09-21 ~ 2026-09-22
+- MSGQ 파이프라인 개발 및 테스트 완료
+- 포트폴리오를 위한 EC2 배포 및 도메인 연결
 - Phase 3 개발 착수: 범위 결정
 
 ---
@@ -309,7 +338,7 @@ Under design..
 │   ├── 04-service.yaml
 │   └── 05-hpa.yaml
 ├── lambda/
-│   ├── alert_notifier.py         # SQS 충돌 후보 알림 발송
+│   ├── alert_notifier.py         # SQS 충돌 후보 알림 발송 (GitHub 관리 제외)
 │   └── s3_trigger.py             # S3 event trigger
 ├── model/                        # 학습과 서빙이 feature 로직 공유
 │   ├── Dockerfile                # 학습/서빙 겸용 컨테이너 이미지
