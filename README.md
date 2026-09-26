@@ -104,6 +104,62 @@
 - `model-serving`: Always-on daemon listening on port 8000; isolated from Airflow orchestration
 
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
+**(Sub-diagram 1)**
+```mermaid
+flowchart LR
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+
+    subgraph top["TRIGGER"]
+        direction LR
+        S3M[("S3 models/<br/>*.ckpt + *.json")]
+        TRIG["Lambda<br/>s3_trigger.py"]
+        GHAPI["GitHub REST API<br/>workflow_dispatch"]
+        RUNNER["Self-hosted<br/>runner"]
+        WORKFLOW["deploy-model.yml"]
+
+        S3M -->|upload event| TRIG
+        TRIG -->|dispatch| GHAPI
+        GHAPI --> RUNNER
+        RUNNER --> WORKFLOW
+    end
+
+    class S3M store
+    class TRIG,GHAPI,RUNNER,WORKFLOW process
+    style top fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
+```
+```mermaid
+flowchart LR
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef decision fill:#ede4f7,stroke:#330066,stroke-width:2px,color:#330066;
+    classDef terminal fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef alert fill:#7a1f3d,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+
+    subgraph bottom["ROLLOUT"]
+        direction LR
+        WORKFLOW["deploy-model.yml"]
+        COMPARE{"latest checkpoint<br/>== current annotation?"}
+        SKIP(["Already up to date<br/>(no-op)"])
+        PATCH["patch annotation<br/>+ trigger rolling restart"]
+        WAIT["kubectl rollout status<br/>(wait)"]
+        SUCCESS(["Rollout succeeded"])
+        ROLLBACK["kubectl rollout undo<br/>(timeout)"]
+
+        WORKFLOW --> COMPARE
+        COMPARE -->|same| SKIP
+        COMPARE -->|new checkpoint| PATCH
+        PATCH --> WAIT
+        WAIT -->|within timeout| SUCCESS
+        WAIT -.->|timeout| ROLLBACK
+    end
+
+    class WORKFLOW,PATCH,WAIT process
+    class COMPARE decision
+    class SUCCESS,SKIP terminal
+    class ROLLBACK alert
+    style bottom fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
+```
+
 **1. Minikube**
 - Configured the model serving environment on a local cluster using Deployment, Service, and HPA manifests.
 - Used the `/health` endpoint for readiness, liveness, and startup probes.
@@ -129,6 +185,41 @@
 - Compares the latest checkpoint in S3 with the current Deployment, and upon detecting changes, patches the K8s Deployment annotation to perform a Rolling Restart on the Minikube cluster.
 
 ### STEP 6. [모니터링/알림] Monitoring & Event-Driven Notification (SQS/SES)
+**(Sub-diagram 2)**
+```mermaid
+flowchart TD
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef alert fill:#7a1f3d,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+
+    subgraph body["MSGQ"]
+        direction TD
+        PRE["preprocessing.py<br/>(producer)"]
+        SQS["Amazon SQS<br/>conjunction alert queue"]
+        DLQ["SQS DLQ<br/>(isolation only)"]
+        LAMBDA["Lambda: alert_notifier.py<br/>(consumer)"]
+        HIST[("DynamoDB<br/>ftor-alert-history")]
+        SUBS[("DynamoDB<br/>ftor-subscribers")]
+        SES["Amazon SES<br/>per-subscriber email"]
+        SNS["Amazon SNS<br/>bounce + complaint topic"]
+        SLACK["Slack Incoming Webhook<br/>channel-level"]
+
+        PRE -->|"distance-sorted, pair-deduped"| SQS
+        SQS --> LAMBDA
+        SQS -.->|retries exhausted| DLQ
+        LAMBDA -->|dedup check / record| HIST
+        LAMBDA -->|read channel config| SUBS
+        LAMBDA -->|per subscriber| SES
+        LAMBDA -->|once per alert| SLACK
+        SES -.->|notify| SNS
+    end
+
+    class PRE,SQS,DLQ,LAMBDA,SNS process
+    class HIST,SUBS store
+    class SES,SLACK alert
+    style body fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
+```
+
 - Alert criteria configuration (for temporary MSGQ testing): Publishes proximity candidates identified as `CONJUNCTION_CANDIDATE=True` during primary screening to a real-time notification pipeline.
 - `preprocessing.py` (producer) sorts candidates by distance in ascending order, deduplicates mutual pairs within the same execution run, and publishes only the top `MAX_ALERTS_PER_RUN` records to Amazon SQS (since the screening threshold serves as a broad first-stage filter, outputting raw results without capping yields an unrealistic alert volume).
 - SQS → Lambda (`ftor-alert-notifier`) consumer: Suppresses re-alerts for identical NORAD pairs via DynamoDB (ftor-alert-history) within a TTL-based deduplication window (default 24h).
@@ -326,11 +417,7 @@ TL;DR: Don't use GHA schedules for production.
 
 ## **⚙️ Components**
 ### Architecture
-**1. Main Architecture**
-
-**2. Sub-diagram 1: Alert Pipeline (MSGQ)**
-
-**3. Sub-diagram 2: CI/CD Pipeline**
+(Main Architecture)
 
 ### Directory
 ```

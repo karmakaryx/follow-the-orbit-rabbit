@@ -104,31 +104,60 @@
 - `model-serving`: 상시 서비스, port 8000, Airflow 대상 아님
 
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
-(Sub-diagram 1)
+**(Sub-diagram 1)**
 ```mermaid
 flowchart LR
-    S3M[("S3 models/<br/>*.ckpt + *.json")]
-    TRIG["Lambda<br/>s3_trigger.py"]
-    GHAPI["GitHub REST API<br/>workflow_dispatch"]
-    RUNNER["Self-hosted<br/>runner"]
-    WORKFLOW["deploy-model.yml"]
-    COMPARE{"latest checkpoint<br/>== current annotation?"}
-    SKIP(["Already up to date<br/>(no-op)"])
-    PATCH["patch annotation<br/>+ trigger rolling restart"]
-    WAIT["kubectl rollout status<br/>(wait)"]
-    SUCCESS(["Rollout succeeded"])
-    ROLLBACK["kubectl rollout undo<br/>(timeout)"]
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
 
-    S3M -->|upload event| TRIG
-    TRIG -->|dispatch| GHAPI
-    GHAPI --> RUNNER
-    RUNNER --> WORKFLOW
-    WORKFLOW --> COMPARE
-    COMPARE -->|same| SKIP
-    COMPARE -->|new checkpoint| PATCH
-    PATCH --> WAIT
-    WAIT -->|within timeout| SUCCESS
-    WAIT -.->|timeout| ROLLBACK
+    subgraph top["TRIGGER"]
+        direction LR
+        S3M[("S3 models/<br/>*.ckpt + *.json")]
+        TRIG["Lambda<br/>s3_trigger.py"]
+        GHAPI["GitHub REST API<br/>workflow_dispatch"]
+        RUNNER["Self-hosted<br/>runner"]
+        WORKFLOW["deploy-model.yml"]
+
+        S3M -->|upload event| TRIG
+        TRIG -->|dispatch| GHAPI
+        GHAPI --> RUNNER
+        RUNNER --> WORKFLOW
+    end
+
+    class S3M store
+    class TRIG,GHAPI,RUNNER,WORKFLOW process
+    style top fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
+```
+```mermaid
+flowchart LR
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef decision fill:#ede4f7,stroke:#330066,stroke-width:2px,color:#330066;
+    classDef terminal fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef alert fill:#7a1f3d,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+
+    subgraph bottom["ROLLOUT"]
+        direction LR
+        WORKFLOW["deploy-model.yml"]
+        COMPARE{"latest checkpoint<br/>== current annotation?"}
+        SKIP(["Already up to date<br/>(no-op)"])
+        PATCH["patch annotation<br/>+ trigger rolling restart"]
+        WAIT["kubectl rollout status<br/>(wait)"]
+        SUCCESS(["Rollout succeeded"])
+        ROLLBACK["kubectl rollout undo<br/>(timeout)"]
+
+        WORKFLOW --> COMPARE
+        COMPARE -->|same| SKIP
+        COMPARE -->|new checkpoint| PATCH
+        PATCH --> WAIT
+        WAIT -->|within timeout| SUCCESS
+        WAIT -.->|timeout| ROLLBACK
+    end
+
+    class WORKFLOW,PATCH,WAIT process
+    class COMPARE decision
+    class SUCCESS,SKIP terminal
+    class ROLLBACK alert
+    style bottom fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
 ```
 
 **1. Minikube**
@@ -156,27 +185,39 @@ flowchart LR
 - S3의 최신 체크포인트와 현재 Deployment를 비교해 변경사항 발생 시 K8s Deployment annotation을 patch하여 Minikube 클러스터의 Rolling Restart 수행
 
 ### STEP 6. [모니터링/알림] Monitoring & Event-Driven Notification (SQS/SES)
-(Sub-diagram 2)
+**(Sub-diagram 2)**
 ```mermaid
 flowchart TD
-    PRE["preprocessing.py<br/>(producer)"]
-    SQS["Amazon SQS<br/>conjunction alert queue"]
-    DLQ["SQS DLQ<br/>(isolation only)"]
-    LAMBDA["Lambda: alert_notifier.py<br/>(consumer)"]
-    HIST[("DynamoDB<br/>ftor-alert-history")]
-    SUBS[("DynamoDB<br/>ftor-subscribers")]
-    SES["Amazon SES<br/>per-subscriber email"]
-    SNS["Amazon SNS<br/>bounce + complaint topic"]
-    SLACK["Slack Incoming Webhook<br/>channel-level"]
+    classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
+    classDef alert fill:#7a1f3d,stroke:#330066,stroke-width:1.5px,color:#ffffff;
 
-    PRE -->|"distance-sorted, pair-deduped"| SQS
-    SQS --> LAMBDA
-    SQS -.->|retries exhausted| DLQ
-    LAMBDA -->|dedup check / record| HIST
-    LAMBDA -->|read channel config| SUBS
-    LAMBDA -->|per subscriber| SES
-    LAMBDA -->|once per alert| SLACK
-    SES -.->|notify| SNS
+    subgraph body["MSGQ"]
+        direction TD
+        PRE["preprocessing.py<br/>(producer)"]
+        SQS["Amazon SQS<br/>conjunction alert queue"]
+        DLQ["SQS DLQ<br/>(isolation only)"]
+        LAMBDA["Lambda: alert_notifier.py<br/>(consumer)"]
+        HIST[("DynamoDB<br/>ftor-alert-history")]
+        SUBS[("DynamoDB<br/>ftor-subscribers")]
+        SES["Amazon SES<br/>per-subscriber email"]
+        SNS["Amazon SNS<br/>bounce + complaint topic"]
+        SLACK["Slack Incoming Webhook<br/>channel-level"]
+
+        PRE -->|"distance-sorted, pair-deduped"| SQS
+        SQS --> LAMBDA
+        SQS -.->|retries exhausted| DLQ
+        LAMBDA -->|dedup check / record| HIST
+        LAMBDA -->|read channel config| SUBS
+        LAMBDA -->|per subscriber| SES
+        LAMBDA -->|once per alert| SLACK
+        SES -.->|notify| SNS
+    end
+
+    class PRE,SQS,DLQ,LAMBDA,SNS process
+    class HIST,SUBS store
+    class SES,SLACK alert
+    style body fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
 ```
 
 - 알람 기준 설정 (MSGQ 임시 테스트용): 1차 screening에서 `CONJUNCTION_CANDIDATE=True`로 판정된 근접 후보를 실시간 알림 파이프라인으로 발행
