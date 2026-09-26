@@ -176,13 +176,13 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 
 - **[STEP 5]** `load_processed_snapshots` 함수가 parquet 전체 컬럼을 읽어오면서 불필요한 TLE 문자열(69x2) 및 ECI/ECEF/LLA 좌표계 등 서빙에 안 쓰는 컬럼까지 메모리에 적재되는 문제 발견. 서빙에 필요한 핵심 컬럼(`NORAD_CAT_ID`, `OBJECT_NAME`, `EPOCH` 등)만 필터링해 읽도록 `REQUIRED_SNAPSHOT_COLS`를 지정하여 `model-serving` Pod의 반복적인 OOMKilled 방지. `print()` 버퍼링 때문에 OOMKilled 직전 로그가 안 보여서 `PYTHONUNBUFFERED=1` 추가
 
-- **[STEP 5]** memory limit을 처음에 2Gi로 잡았다가 OOMKilled 발생. 실측하니 안정 상태 기준 ~2821Mi 소비 중이었고, 캐시 TTL 갱신 시점 메모리가 순간적으로 더 튀는 걸 확인해 여유를 두고 3.5Gi로 상향
+- **[STEP 5]** memory limit을 처음에 2Gi로 잡았다가 OOMKilled 발생. 실측하니 안정 상태 기준 ~2,821Mi 소비 중이었고, 캐시 TTL 갱신 시점 메모리가 순간적으로 더 튀는 걸 확인해 여유를 두고 3.5Gi로 상향
 
 - **[STEP 5]** 배포 직후 readinessProbe가 계속 실패해서 Pod가 Ready로 안 넘어가는 문제 발생. `serve.py`가 S3에서 체크포인트를 다운로드하는 동안 이미 liveness/readiness probe가 돌기 시작해 타임아웃으로 재시작을 반복하고 있었음. startupProbe를 별도로 추가해 초기 로딩 시간을 넉넉히 기다려주고, 그 이후부터 liveness/readiness가 넘겨받도록 분리
 
 - **[STEP 5]** maxUnavailable: 0 / maxSurge: 1 설정으로 새 Pod가 Ready 될 때까지 기존 Pod가 트래픽을 계속 처리하는걸 확인해 replicas=1인 상태로도 무중단 배포 가능
 
-- **[STEP 5]** systemd 서비스는 interactive shell PATH(.bashrc 등)를 안 물려받음. PATH 의존적인 도구(`uv` 등)보다 apt 설치 표준 경로 바이너리가 CI 서비스 환경에 더 안정적
+- **[STEP 5]** systemd 서비스는 interactive shell PATH(.bashrc 등)를 안 물려받음. PATH 의존적인 도구(uv 등)보다 apt 설치 표준 경로 바이너리가 CI 서비스 환경에 더 안정적
 
 - **[STEP 5]** `ftor-s3-trigger` Lambda 초기 배포 시 Handler 설정 오류로 `Runtime.HandlerNotFound` 발생. Runtime settings에서 Handler를 `lambda_function.handler`로 수정하여 해결. 이후 콘솔에서 .ckpt와 .json suffix 트리거 2개를 등록하는 과정에서 두 번째 트리거가 동일한 Statement ID로 Lambda resource policy를 덮어써서 .json 이벤트에 대한 invoke 권한이 누락되는 문제도 함께 발견하여 `aws lambda add-permission`으로 별도 Statement ID를 가진 권한을 추가하여 해결
 
@@ -204,7 +204,7 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 
 - **[STEP 6]** Lambda 함수 생성 시 기본 timeout(3s)을 그대로 두고 배포하여, DynamoDB dedup 조회 + SES 발송 + Slack HTTP 요청이 순차 실행되는 동안 타임아웃 발생. 30초로 상향 조정 후 해결
 
-- **[STEP 6]** 1차 screening 임계값(25km)이 원래 후보군을 넉넉히 모으는 용도였는데 이를 그대로 알림 트리거로 연결하자, 실측 기준 전체 35,212개 객체 중 18,916개(과반)가 후보로 잡혀 한 번의 실행에서 수백 건의 이메일·Slack 알림이 발송됨 (trigger를 급삭제해 472건 수준에서 겨우 차단!😭). Starlink 등 근접 군집 위성이 상시로 이 거리 안에 있는 게 원인이며 버그는 아니었음. 정밀 계산 필터링을 붙이기 전까지 임시 조치로, 거리 오름차순 상위 기본 2건만 발행하도록 producer에 제한을 둠
+- **[STEP 6]** 1차 screening 임계값(25km)이 원래 후보군을 넉넉히 모으는 용도였는데 이를 그대로 알림 트리거로 연결하자, 실측 기준 전체 35,212개 객체 중 18,916개(과반)가 후보로 잡혀 한 번의 실행에서 수백 건의 이메일·Slack 알림이 발송됨 (trigger를 급삭제해 472건 수준에서 겨우 차단! 😭). Starlink 등 근접 군집 위성이 상시로 이 거리 안에 있는 게 원인이며 버그는 아니었음. 정밀 계산 필터링을 붙이기 전까지 임시 조치로, 거리 오름차순 상위 기본 2건만 발행하도록 producer에 제한을 둠
 
 - **[STEP 6]** consumer(Lambda)가 이메일 발송 실패 시 raise로 예외를 전파하고 있어, 구독자 여러 명 중 한 명이라도 실패하면 함수가 중단되고 dedup 기록(`_record_sent`)에 도달하지 못하는 구조였음. 그 상태로 SQS가 재시도하면 이미 성공한 구독자에게도 중복 발송되는 문제를 확인. 채널별 발송을 개별 try/except로 감싸 한쪽 실패가 다른 발송을 막지 않도록 수정하고, dedup 기록은 발송 성공/실패와 무관하게 항상 남기도록 변경
 
@@ -327,7 +327,11 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 
 ## **⚙️ Components**
 ### Architecture
-Under design..
+**1. Main Architecture**
+
+**2. Sub-diagram 1: Alert Pipeline (MSGQ)**
+
+**3. Sub-diagram 2: CI/CD Pipeline**
 
 ### Directory
 ```
@@ -380,6 +384,12 @@ Under design..
 ├── README.md
 └── uv.lock                       # 의존성 lock 파일
 ```
+
+<div align="center">
+  <h3><b>Coming Up Next (in Phase 3):</b></h3>
+  <img src="./assets/mutel.jpg" alt="mutel" width="70%"/><br>
+  <b>(Cover Model: Mutel)</b>
+</div>
 
 ---
 

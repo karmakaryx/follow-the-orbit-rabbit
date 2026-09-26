@@ -326,7 +326,11 @@ TL;DR: Don't use GHA schedules for production.
 
 ## **⚙️ Components**
 ### Architecture
-Under design..
+**1. Main Architecture**
+
+**2. Sub-diagram 1: Alert Pipeline (MSGQ)**
+
+**3. Sub-diagram 2: CI/CD Pipeline**
 
 ### Directory
 ```
@@ -379,6 +383,12 @@ Under design..
 ├── README.md
 └── uv.lock                       # dependency lock file
 ```
+
+<div align="center">
+  <h3><b>Coming Up Next (in Phase 3):</b></h3>
+  <img src="./assets/mutel.jpg" alt="mutel" width="70%"/><br>
+  <b>(Cover Model: Mutel)</b>
+</div>
 
 ---
 
