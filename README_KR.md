@@ -104,6 +104,33 @@
 - `model-serving`: 상시 서비스, port 8000, Airflow 대상 아님
 
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
+(Sub-diagram 1)
+```mermaid
+flowchart LR
+    S3M[("S3 models/<br/>*.ckpt + *.json")]
+    TRIG["Lambda<br/>s3_trigger.py"]
+    GHAPI["GitHub REST API<br/>workflow_dispatch"]
+    RUNNER["Self-hosted<br/>runner"]
+    WORKFLOW["deploy-model.yml"]
+    COMPARE{"latest checkpoint<br/>== current annotation?"}
+    SKIP(["Already up to date<br/>(no-op)"])
+    PATCH["patch annotation<br/>+ trigger rolling restart"]
+    WAIT["kubectl rollout status<br/>(wait)"]
+    SUCCESS(["Rollout succeeded"])
+    ROLLBACK["kubectl rollout undo<br/>(timeout)"]
+
+    S3M -->|upload event| TRIG
+    TRIG -->|dispatch| GHAPI
+    GHAPI --> RUNNER
+    RUNNER --> WORKFLOW
+    WORKFLOW --> COMPARE
+    COMPARE -->|same| SKIP
+    COMPARE -->|new checkpoint| PATCH
+    PATCH --> WAIT
+    WAIT -->|within timeout| SUCCESS
+    WAIT -.->|timeout| ROLLBACK
+```
+
 **1. Minikube**
 - 로컬 클러스터에 Deployment + Service + HPA manifest로 모델 서빙 환경 구성
 - readiness/liveness/startup probe는 `/health` 엔드포인트 사용
@@ -129,6 +156,29 @@
 - S3의 최신 체크포인트와 현재 Deployment를 비교해 변경사항 발생 시 K8s Deployment annotation을 patch하여 Minikube 클러스터의 Rolling Restart 수행
 
 ### STEP 6. [모니터링/알림] Monitoring & Event-Driven Notification (SQS/SES)
+(Sub-diagram 2)
+```mermaid
+flowchart TD
+    PRE["preprocessing.py<br/>(producer)"]
+    SQS["Amazon SQS<br/>conjunction alert queue"]
+    DLQ["SQS DLQ<br/>(isolation only)"]
+    LAMBDA["Lambda: alert_notifier.py<br/>(consumer)"]
+    HIST[("DynamoDB<br/>ftor-alert-history")]
+    SUBS[("DynamoDB<br/>ftor-subscribers")]
+    SES["Amazon SES<br/>per-subscriber email"]
+    SNS["Amazon SNS<br/>bounce + complaint topic"]
+    SLACK["Slack Incoming Webhook<br/>channel-level"]
+
+    PRE -->|"distance-sorted, pair-deduped"| SQS
+    SQS --> LAMBDA
+    SQS -.->|retries exhausted| DLQ
+    LAMBDA -->|dedup check / record| HIST
+    LAMBDA -->|read channel config| SUBS
+    LAMBDA -->|per subscriber| SES
+    LAMBDA -->|once per alert| SLACK
+    SES -.->|notify| SNS
+```
+
 - 알람 기준 설정 (MSGQ 임시 테스트용): 1차 screening에서 `CONJUNCTION_CANDIDATE=True`로 판정된 근접 후보를 실시간 알림 파이프라인으로 발행
 - `preprocessing.py`(producer)가 거리 오름차순 정렬 후 동일 실행 내 mutual pair 중복을 제거하고, 상위 `MAX_ALERTS_PER_RUN`건만 Amazon SQS에 발행 (screening 임계값 자체는 후보군을 넉넉히 모으는 1차 필터라 그대로 알림으로 내보내면 비현실적인 건수가 나옴)
 - SQS → Lambda(`ftor-alert-notifier`) 트리거로 consumer 실행: DynamoDB(`ftor-alert-history`)로 동일 NORAD 쌍 재알림을 TTL 기반 dedup window(기본 24h) 안에서 차단
@@ -327,11 +377,7 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 
 ## **⚙️ Components**
 ### Architecture
-**1. Main Architecture**
-
-**2. Sub-diagram 1: Alert Pipeline (MSGQ)**
-
-**3. Sub-diagram 2: CI/CD Pipeline**
+(Main Architecture)
 
 ### Directory
 ```
