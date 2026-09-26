@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")  # FastAPI 서버 주소
-REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "60"))
 
 st.set_page_config(page_title="FTOR Collision Anomaly Dashboard", page_icon="🐇", layout="wide")
 
