@@ -106,6 +106,7 @@
 ### STEP 5. [배포/자동화] Local K8s Cluster & CI/CD (Minikube/GitHub Actions)
 **(Sub-diagram 1)**
 ```mermaid
+%%{init: {'themeVariables': { 'edgeLabelBackground': '#f3ecfa' }}}%%
 flowchart LR
     classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
     classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
@@ -129,6 +130,7 @@ flowchart LR
     style top fill:#f7f3fb,stroke:#330066,stroke-width:1px,stroke-dasharray: 3 3
 ```
 ```mermaid
+%%{init: {'themeVariables': { 'edgeLabelBackground': '#f3ecfa' }}}%%
 flowchart LR
     classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
     classDef decision fill:#ede4f7,stroke:#330066,stroke-width:2px,color:#330066;
@@ -187,6 +189,7 @@ flowchart LR
 ### STEP 6. [모니터링/알림] Monitoring & Event-Driven Notification (SQS/SES)
 **(Sub-diagram 2)**
 ```mermaid
+%%{init: {'themeVariables': { 'edgeLabelBackground': '#f3ecfa' }}}%%
 flowchart TD
     classDef process fill:#9b6fc4,stroke:#330066,stroke-width:1.5px,color:#ffffff;
     classDef store fill:#5c2d91,stroke:#330066,stroke-width:1.5px,color:#ffffff;
