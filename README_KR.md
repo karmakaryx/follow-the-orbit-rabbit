@@ -51,6 +51,68 @@
 
 ---
 
+## **⚙️ Components**
+### Architecture
+(Main Architecture)
+
+<details>
+<summary><b>📁 Directory Structure (click to expand)</b></summary>
+
+### Directory
+```
+├── .github/                      # GitHub Actions CI/CD 자동화 스크립트
+│   └── workflows/
+│       └── deploy-model.yml
+├── .venv/...                     # (GitHub 관리 제외)
+├── assets/...                    # README images
+├── dags/                         # (GitHub 관리 제외)
+│   ├── ingestion_dag.py          # Space-Track TLE 수집 및 전처리 DAG
+│   └── model_training_dag.py     # LSTM Autoencoder 학습 DAG
+├── dashboard/                    # serve.py의 HTTP API만 호출하는 임시 MVP UI
+│   ├── requirements.txt          # dashboard dependencies
+│   └── streamlit_app.py          # Streamlit app
+├── data/...                      # raw/ 참조 스냅샷 로컬 캐시 (GitHub 관리 제외)
+├── data-prepare/
+│   ├── Dockerfile                # ingestion/preprocessing 컨테이너 이미지
+│   ├── ingestion.py              # 카탈로그 수집, 검증, 적재
+│   ├── preprocessing.py          # 좌표변환, 검증, 궤도 변동치, 근접 스크리닝
+│   └── requirements.txt          # ingestion/preprocessing dependencies
+├── k8s/                          # Kubernetes Manifest
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.yaml.example
+│   ├── 03-deployment.yaml
+│   ├── 04-service.yaml
+│   └── 05-hpa.yaml
+├── lambda/
+│   ├── alert_notifier.py         # 충돌 후보 SQS 알림 발송 (GitHub 관리 제외)
+│   └── s3_trigger.py             # S3 event trigger
+├── model/                        # 학습과 서빙이 feature 로직 공유
+│   ├── Dockerfile                # 학습·서빙 겸용 컨테이너 이미지
+│   ├── model.py                  # LSTM Autoencoder 정의
+│   ├── requirements.txt          # training/serving dependencies
+│   ├── sequence_builder.py       # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
+│   ├── serve.py                  # FastAPI inference serving
+│   ├── torch_dataset.py          # padding & masking
+│   └── train.py                  # 시퀀스 구성, 학습, W&B logging
+├── scripts/                      # 배포 자동화 스크립트
+│   └── deploy/
+│       ├── check_and_rollout.py
+│       └── requirements.txt
+├── .env                          # 실제 환경변수
+├── .env.example                  # 환경변수 템플릿
+├── .gitignore
+├── docker-compose.yml            # (GitHub 관리 제외)
+├── Dockerfile.airflow            # Airflow 이미지
+├── pyproject.toml                # 프로젝트 의존성 정의
+├── README_KR.md
+├── README.md
+└── uv.lock                       # 의존성 lock 파일
+```
+</details>
+
+---
+
 ## **🎬 MLOps Scenario**
 ### STEP 1. [수집] Data Ingestion (Airflow/S3)
 - Space-Track REST API 호출
@@ -320,12 +382,31 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 ---
 
 ## 📊 MLOps Pipeline & Workflow Execution
-### 1. Experiment Logger
+### 1. Orchestration (Airflow)
+<p align="center">
+  <img src="./assets/airflow1.png" alt="airflow1" width="49.5%"/>
+  <img src="./assets/airflow2.png" alt="airflow2" width="49.5%"/>
+  <img src="./assets/airflow3.png" alt="airflow3"/>
+</p>
+
+### 2. Data Lake & Artifact Storage
+<p align="center">
+  <img src="./assets/aws1.png" alt="aws1" width="49.5%"/>
+  <img src="./assets/aws2.png" alt="aws2" width="49.5%"/>
+</p>
+
+### 3. Experiment Logger
 ![wandb1](./assets/wandb1.png)
 
-### 2. Actions & CI/CD Workflows
+### 4. Actions & CI/CD Workflows
 ![workflow1](./assets/workflow1.png)
 ![workflow2](./assets/workflow2.png)
+
+### 5. Notification Services
+<p align="center">
+  <img src="./assets/slack.png" alt="slack" width="49.5%"/>
+  <img src="./assets/email.png" alt="email" width="49.5%"/>
+</p>
 
 ---
 
@@ -418,62 +499,6 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 - Phase 3 개발 착수: 범위 결정
 
 ---
-
-## **⚙️ Components**
-### Architecture
-(Main Architecture)
-
-### Directory
-```
-├── .github/                      # GitHub Actions CI/CD 자동화 스크립트
-│   └── workflows/
-│       └── deploy-model.yml
-├── .venv/...                     # (GitHub 관리 제외)
-├── assets/...                    # README images
-├── dags/                         # (GitHub 관리 제외)
-│   ├── ingestion_dag.py          # Space-Track TLE 수집 및 전처리 DAG
-│   └── model_training_dag.py     # LSTM Autoencoder 학습 DAG
-├── dashboard/                    # serve.py의 HTTP API만 호출하는 임시 MVP UI
-│   ├── requirements.txt          # dashboard dependencies
-│   └── streamlit_app.py          # Streamlit app
-├── data/...                      # raw/ 참조 스냅샷 로컬 캐시 (GitHub 관리 제외)
-├── data-prepare/
-│   ├── Dockerfile                # ingestion/preprocessing 컨테이너 이미지
-│   ├── ingestion.py              # 카탈로그 수집, 검증, 적재
-│   ├── preprocessing.py          # 좌표변환, 검증, 궤도 변동치, 근접 스크리닝
-│   └── requirements.txt          # ingestion/preprocessing dependencies
-├── k8s/                          # Kubernetes Manifest
-│   ├── 00-namespace.yaml
-│   ├── 01-configmap.yaml
-│   ├── 02-secret.yaml.example
-│   ├── 03-deployment.yaml
-│   ├── 04-service.yaml
-│   └── 05-hpa.yaml
-├── lambda/
-│   ├── alert_notifier.py         # 충돌 후보 SQS 알림 발송 (GitHub 관리 제외)
-│   └── s3_trigger.py             # S3 event trigger
-├── model/                        # 학습과 서빙이 feature 로직 공유
-│   ├── Dockerfile                # 학습·서빙 겸용 컨테이너 이미지
-│   ├── model.py                  # LSTM Autoencoder 정의
-│   ├── requirements.txt          # training/serving dependencies
-│   ├── sequence_builder.py       # 객체별 윈도우 묶기, gap 처리 (GitHub 관리 제외)
-│   ├── serve.py                  # FastAPI inference serving
-│   ├── torch_dataset.py          # padding & masking
-│   └── train.py                  # 시퀀스 구성, 학습, W&B logging
-├── scripts/                      # 배포 자동화 스크립트
-│   └── deploy/
-│       ├── check_and_rollout.py
-│       └── requirements.txt
-├── .env                          # 실제 환경변수
-├── .env.example                  # 환경변수 템플릿
-├── .gitignore
-├── docker-compose.yml            # (GitHub 관리 제외)
-├── Dockerfile.airflow            # Airflow 이미지
-├── pyproject.toml                # 프로젝트 의존성 정의
-├── README_KR.md
-├── README.md
-└── uv.lock                       # 의존성 lock 파일
-```
 
 <div align="center">
   <h3><b>Coming Up Next (in Phase 3):</b></h3>

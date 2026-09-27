@@ -51,6 +51,68 @@
 
 ---
 
+## **⚙️ Components**
+### Architecture
+(Main Architecture)
+
+<details>
+<summary><b>📁 Directory Structure (click to expand)</b></summary>
+
+### Directory
+```
+├── .github/                      # GitHub Actions CI/CD automation
+│   └── workflows/
+│       └── deploy-model.yml
+├── .venv/...                     # (excluded from GitHub)
+├── assets/...                    # README images
+├── dags/                         # (excluded from GitHub)
+│   ├── ingestion_dag.py          # DAG for Space-Track TLE ingestion & preprocessing
+│   └── model_training_dag.py     # DAG for LSTM Autoencoder model training
+├── dashboard/                    # temporary MVP UI consuming serve.py HTTP API
+│   ├── requirements.txt          # dashboard dependencies
+│   └── streamlit_app.py          # Streamlit app
+├── data/...                      # raw/ reference snapshot local cache (excluded from GitHub)
+├── data-prepare/
+│   ├── Dockerfile                # container image for ingestion/preprocessing
+│   ├── ingestion.py              # catalog ingestion, validation, storage
+│   ├── preprocessing.py          # coordinate transformation, validation, orbital element variations, proximity screening
+│   └── requirements.txt          # ingestion/preprocessing dependencies
+├── k8s/                          # Kubernetes Manifest
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-secret.yaml.example
+│   ├── 03-deployment.yaml
+│   ├── 04-service.yaml
+│   └── 05-hpa.yaml
+├── lambda/
+│   ├── alert_notifier.py         # SQS notification dispatch for collision candidates (excluded from GitHub)
+│   └── s3_trigger.py             # S3 event trigger
+├── model/                        # shared directory containing feature logic for training & serving
+│   ├── Dockerfile                # container image for training/serving
+│   ├── model.py                  # LSTM Autoencoder architecture definition
+│   ├── requirements.txt          # training·serving dependencies
+│   ├── sequence_builder.py       # per-object windowing, gap handling (excluded from GitHub)
+│   ├── serve.py                  # FastAPI inference serving
+│   ├── torch_dataset.py          # padding & masking
+│   └── train.py                  # sequence construction, model training, W&B logging
+├── scripts/                      # Deployment automation scripts
+│   └── deploy/
+│       ├── check_and_rollout.py
+│       └── requirements.txt
+├── .env                          # environment variables
+├── .env.example                  # template for environment variables
+├── .gitignore
+├── docker-compose.yml            # (excluded from GitHub)
+├── Dockerfile.airflow            # custom Airflow container image
+├── pyproject.toml                # project configuration & dependencies
+├── README_KR.md
+├── README.md
+└── uv.lock                       # dependency lock file
+```
+</details>
+
+---
+
 ## **🎬 MLOps Scenario**
 ### STEP 1. [수집] Data Ingestion (Airflow/S3)
 - Poll Space-Track REST API.
@@ -319,12 +381,31 @@ TL;DR: Don't use GHA schedules for production.
 ---
 
 ## 📊 MLOps Pipeline & Workflow Execution
-### 1. Experiment Logger
+### 1. Orchestration (Airflow)
+<p align="center">
+  <img src="./assets/airflow1.png" alt="airflow1" width="49.5%"/>
+  <img src="./assets/airflow2.png" alt="airflow2" width="49.5%"/>
+  <img src="./assets/airflow3.png" alt="airflow3"/>
+</p>
+
+### 2. Data Lake & Artifact Storage
+<p align="center">
+  <img src="./assets/aws1.png" alt="aws1" width="49.5%"/>
+  <img src="./assets/aws2.png" alt="aws2" width="49.5%"/>
+</p>
+
+### 3. Experiment Logger
 ![wandb1](./assets/wandb1.png)
 
-### 2. Actions & CI/CD Workflows
+### 4. Actions & CI/CD Workflows
 ![workflow1](./assets/workflow1.png)
 ![workflow2](./assets/workflow2.png)
+
+### 5. Notification Services
+<p align="center">
+  <img src="./assets/slack.png" alt="slack" width="49.5%"/>
+  <img src="./assets/email.png" alt="email" width="49.5%"/>
+</p>
 
 ---
 
@@ -417,62 +498,6 @@ TL;DR: Don't use GHA schedules for production.
 - Initiated Phase 3 development: defined project scope
 
 ---
-
-## **⚙️ Components**
-### Architecture
-(Main Architecture)
-
-### Directory
-```
-├── .github/                      # GitHub Actions CI/CD automation
-│   └── workflows/
-│       └── deploy-model.yml
-├── .venv/...                     # (excluded from GitHub)
-├── assets/...                    # README images
-├── dags/                         # (excluded from GitHub)
-│   ├── ingestion_dag.py          # DAG for Space-Track TLE ingestion & preprocessing
-│   └── model_training_dag.py     # DAG for LSTM Autoencoder model training
-├── dashboard/                    # temporary MVP UI consuming serve.py HTTP API
-│   ├── requirements.txt          # dashboard dependencies
-│   └── streamlit_app.py          # Streamlit app
-├── data/...                      # raw/ reference snapshot local cache (excluded from GitHub)
-├── data-prepare/
-│   ├── Dockerfile                # container image for ingestion/preprocessing
-│   ├── ingestion.py              # catalog ingestion, validation, storage
-│   ├── preprocessing.py          # coordinate transformation, validation, orbital element variations, proximity screening
-│   └── requirements.txt          # ingestion/preprocessing dependencies
-├── k8s/                          # Kubernetes Manifest
-│   ├── 00-namespace.yaml
-│   ├── 01-configmap.yaml
-│   ├── 02-secret.yaml.example
-│   ├── 03-deployment.yaml
-│   ├── 04-service.yaml
-│   └── 05-hpa.yaml
-├── lambda/
-│   ├── alert_notifier.py         # SQS notification dispatch for collision candidates (excluded from GitHub)
-│   └── s3_trigger.py             # S3 event trigger
-├── model/                        # shared directory containing feature logic for training & serving
-│   ├── Dockerfile                # container image for training/serving
-│   ├── model.py                  # LSTM Autoencoder architecture definition
-│   ├── requirements.txt          # training·serving dependencies
-│   ├── sequence_builder.py       # per-object windowing, gap handling (excluded from GitHub)
-│   ├── serve.py                  # FastAPI inference serving
-│   ├── torch_dataset.py          # padding & masking
-│   └── train.py                  # sequence construction, model training, W&B logging
-├── scripts/                      # Deployment automation scripts
-│   └── deploy/
-│       ├── check_and_rollout.py
-│       └── requirements.txt
-├── .env                          # environment variables
-├── .env.example                  # template for environment variables
-├── .gitignore
-├── docker-compose.yml            # (excluded from GitHub)
-├── Dockerfile.airflow            # custom Airflow container image
-├── pyproject.toml                # project configuration & dependencies
-├── README_KR.md
-├── README.md
-└── uv.lock                       # dependency lock file
-```
 
 <div align="center">
   <h3><b>Coming Up Next (in Phase 3):</b></h3>
