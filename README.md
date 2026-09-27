@@ -158,6 +158,7 @@
 - `serve.py` automatically fetches and loads the latest checkpoint from S3 upon startup (no hot reloading).
 - Upon request, aggregates recent processed snapshots from S3 (with caching enabled) and constructs target sequences using the exact same pipeline as training (stale TLE filter → windowing → feature extraction) for inference.
 - Build an MVP dashboard using Streamlit: Consumes only the `/health` and `/score/{norad_cat_id}` endpoints provided by FastAPI (`serve.py`). Handles 404 and 422 (insufficient snapshots) responses distinctly to surface appropriate error messages.
+
 ![dashboard1](./assets/dashboard1.png)
 ![dashboard2](./assets/dashboard2.png)
 
@@ -235,6 +236,7 @@ flowchart LR
 - The Service exposes only the cluster-internal network via ClusterIP (external access via Ingress is planned for future phases).
 - HPA (HorizontalPodAutoscaler) automatically scales replicas based on a 70% CPU target utilization.
 - Empirical HPA Verification: Triggered an infinite request loop using a busybox pod, driving CPU utilization up from 1% to over 400% and confirming automatic scale-up from 1 to 3 replicas. Upon removing the load, CPU usage dropped immediately to 0%, but scale-down from 3 to 1 replicas occurred only after the stabilization window (~5 mins) elapsed—confirming expected behavior designed to prevent aggressive replica flapping.
+
 ![hpa](./assets/hpa.png)
 
 **2. GitHub Actions**

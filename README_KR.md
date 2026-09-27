@@ -158,6 +158,7 @@
 - `serve.py`는 시작 시에만 S3에서 가장 최근 체크포인트를 자동으로 찾아 로드하고 핫리로드 없음
 - 요청 시 S3에서 최근 processed 스냅샷들을 모아(cache 유지) 해당 객체의 시퀀스를 학습 때와 동일한 파이프라인(오래된 TLE 필터 → 윈도우 → feature 추출)으로 구성해 추론
 - Streamlit으로 MVP dashboard 작성: FastAPI(`serve.py`)가 제공하는 `/health`, `/score/{norad_cat_id}` 엔드포인트를 그대로 호출만. 404, 422(스냅샷 부족) 응답을 각각 구분해서 에러 메시지로 노출
+
 ![dashboard1](./assets/dashboard1.png)
 ![dashboard2](./assets/dashboard2.png)
 
@@ -235,6 +236,7 @@ flowchart LR
 - Service는 ClusterIP로 클러스터 내부망만 개방 (외부 접근은 차후 Ingress 추가 예정)
 - HPA(HorizontalPodAutoscaler)는 CPU 사용률 70% 기준으로 replica 자동 조정
 - HPA 실측 검증: busybox pod로 무한 요청 루프로 부하 발생 CPU 1% → 400% 상승, replica 1 → 3 자동 스케일업 확인. 부하 제거 후 CPU 0%로 즉시 하락하지만 stabilization window(~5분) 동안 유지되다가 3 → 1로 스케일다운 (급격한 replica 요동 방지 설계 검증)
+
 ![hpa](./assets/hpa.png)
 
 **2. GitHub Actions**
