@@ -120,6 +120,8 @@
 - 퇴역일이 존재하지 않는 활성화 건만 수집
 - 원본 json을 S3 `raw/` 적재 (eg. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
+![airflow](./assets/airflow.png)
+
 ### STEP 2. [전처리/가공] Preprocessing & Feature Engineering
 - SGP4 및 Skyfield 라이브러리를 사용하여 좌표 변환: TLE → ECI → ECEF → LLA
 - 데이터 검증: 스키마, 결측치, 값범위 체크
@@ -128,6 +130,8 @@
 - Screening Engine: 궤도 유사군으로 1차 필터링. KDTree 기반 공간 인덱스 (전체 조합 대신 근접 후보만 빠르게 추출)
 - 상대 거리 계산: 두 객체간 거리가 설정한 근접 임계치 이내인지 평가하여 충돌 위험 후보군 선별
 - parquet 포맷 변환 후 S3 `processed/` 적재 (eg. `s3://my-bucket/processed/year=2026/month=08/day=22/tle_processed_020100.parquet`)
+
+![s3](./assets/s3.png)
 
 ### STEP 3. [학습/등록] Model Training & Registry (LSTM Autoencoder/W&B)
 **1. 시계열 시퀀스 구성**
@@ -298,6 +302,24 @@ flowchart TD
 - 실패 발송 대비 SQS DLQ(`maxReceiveCount` 기준 재시도 소진 시 격리) 구성
 - SES(Simple Email Service): 현재는 검증된 이메일끼리만 발송 가능한 sandbox mode. 일일 이메일 발송 한도(Daily sending quota)를 초과해서 한도 증설 필요했으나 Production Access 신청 (봇에 의해) 거절. 일해라 AWS.. 당장은 테스트 가능하니 라이브 후 구독자 증가하는 경우 재신청 예정
 
+<table>
+  <tr>
+    <td width="31%" rowspan="2" align="center">
+      <img src="./assets/notification.png" alt="notification" width="100%"/>
+    </td>
+    <td width="50%" align="center">
+      <img src="./assets/slack.png" alt="slack" width="100%"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./assets/email.png" alt="email" width="100%"/>
+    </td>
+  </tr>
+</table>
+
+**(Cover Model: 우주토끼 [wouldyou ttokki])**
+
 ---
 
 ## **💡 Insights from Trial and Error**
@@ -387,44 +409,12 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 ---
 
 ## 📊 MLOps Pipeline & Workflow Execution
-### 1. Orchestration (Airflow)
-<p align="center">
-  <img src="./assets/airflow1.png" alt="airflow1" width="49.5%"/>
-  <img src="./assets/airflow2.png" alt="airflow2" width="49.5%"/>
-  <img src="./assets/airflow3.png" alt="airflow3" width="99.4%"/>
-</p>
+### 1. Experiment Logger (W&B)
+![wandb](./assets/wandb.png)
 
-### 2. Data Lake & Artifact Storage
-<p align="center">
-  <img src="./assets/aws1.png" alt="aws1" width="49.5%"/>
-  <img src="./assets/aws2.png" alt="aws2" width="49.5%"/>
-</p>
-
-### 3. Experiment Logger
-![wandb1](./assets/wandb1.png)
-
-### 4. Actions & CI/CD Workflows
+### 2. CI/CD Workflows (GitHub Actions)
 ![workflow1](./assets/workflow1.png)
 ![workflow2](./assets/workflow2.png)
-
-### 5. Notification Services
-<table>
-  <tr>
-    <td width="31%" rowspan="2" align="center">
-      <img src="./assets/notification.png" alt="notification" width="100%"/>
-    </td>
-    <td width="50%" align="center">
-      <img src="./assets/slack.png" alt="slack" width="100%"/>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="./assets/email.png" alt="email" width="100%"/>
-    </td>
-  </tr>
-</table>
-
-**(Cover Model: 우주토끼 [wouldyou ttokki])**
 
 ---
 
