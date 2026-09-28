@@ -57,6 +57,7 @@
 > 현재 구현(Phase 2)은 preprocessing.py의 거리 기반 1차 스크리닝 결과가 곧바로 Alert Pipeline으로 발행됩니다.<br>
 차후 고도화 단계에서 serve.py의 이상 탐지 점수(reconstruction loss)를 2차 필터로 통합해 정밀 추론 및 PoC(Probability of Collision) 계산을 완료하고, 설정한 위험 임계치(예: $\text{PoC} \ge 10^{-4}$)를 초과하는 경우에만 알람이 발송될 예정입니다.
 
+<br>
 <details>
 <summary><b>📁 Directory Structure (click to expand)</b></summary>
 

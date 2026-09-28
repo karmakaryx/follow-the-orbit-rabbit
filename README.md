@@ -57,6 +57,7 @@
 > In the current implementation (Phase 2), the 1st-stage distance-based screening results from preprocessing.py are directly published to the Alert Pipeline.<br>
 In a future enhancement phase, the anomaly detection score (reconstruction loss) from serve.py will be integrated as a 2nd-stage filter to complete fine inference and PoC (Probability of Collision) calculations, triggering alerts only when the risk exceeds a predefined threshold (e.g. $\text{PoC} \ge 10^{-4}$).
 
+<br>
 <details>
 <summary><b>📁 Directory Structure (click to expand)</b></summary>
 
