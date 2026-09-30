@@ -27,12 +27,13 @@
 - **Task-Isolated Infrastructure:** Docker
 - **Model Training:** PyTorch Lightning
 - **Experiment Tracking:** W&B
-- **Model Registry:** MLflow
+- **Model Registry:** MLflow (🔜 To be applied in Phase 3)
 - **Inference Serving:** FastAPI
 - **Local Kubernetes Cluster:** Minikube (EKS Alternative)
 - **Serverless Event Trigger:** AWS Lambda
 - **CI/CD Pipeline:** GitHub Actions
-- **Dashboard:** Streamlit
+- **Dashboard (MVP):** Streamlit
+- **Frontend Web Application:** React, TypeScript, Vite, Tailwind CSS (🔜 To be applied in Phase 4)
 - **Message Queue:** Amazon SQS, SNS, Lambda, DynamoDB
 - **Notification Services:** Amazon SES, Slack Webhook
 
@@ -111,7 +112,7 @@ In a future enhancement phase, the anomaly detection score (reconstruction loss)
 ## **🎬 MLOps Scenario**
 ### STEP 1. [수집] Data Ingestion (Airflow/S3)
 - Poll Space-Track REST API.
-- Periodically perform incremental ingestion of the full TLE catalog (~35,000 objects) for launch vehicles and satellite constellations of interest (e.g. Starlink, LEO space debris)
+- Periodically take a full-catalog snapshot of the TLE dataset (~35,000 active objects, excluding decayed items) for launch vehicles and satellite constellations of interest (e.g. Starlink, LEO space debris)
 - Collect active objects only (where decay date is empty)
 - Store raw JSON in S3 `raw/` path (e.g. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
@@ -145,7 +146,7 @@ In a future enhancement phase, the anomaly detection score (reconstruction loss)
 - Padded timesteps are excluded from loss calculations during both training and evaluation using `masked_mse_loss`.
 
 **4. Model Training & Registration**
-- Input normal TLE sequences (e.g. continuous orbital trajectories over the past 30 days) into the LSTM Autoencoder to learn compressed representations and reconstructions of normal orbital perturbation patterns.
+- Input normal TLE sequences (e.g. continuous orbital trajectories over 72-hour windows) into the LSTM Autoencoder to learn compressed representations and reconstructions of normal orbital perturbation patterns.
 - Load processed parquet files → Filter outdated TLEs → Construct sequences → Perform object-based 85/15 train/val split (preventing data leakage) → Train → Log to W&B
 - To avoid consuming W&B artifact storage on the free tier, model checkpoints and scalers are uploaded to the S3 `models/` path, while logging only the corresponding S3 keys to W&B.
 - The DAG handles training and checkpoint upload, leaving deployment to K8s rolling updates.
@@ -314,6 +315,7 @@ flowchart TD
 </table>
 
 **(Cover Model: 우주토끼 [wouldyou ttokki])**
+> The current notification system sends 1st-stage screening results ordered by distance to verify end-to-end pipeline functionality. Probability of Collision (PoC)-based criteria is scheduled for Phase 3.
 
 ---
 
@@ -497,7 +499,6 @@ TL;DR: Don't use GHA schedules for production.
 - Added SNS topic and subscriptions to prevent emails from being flagged as spam
 - Adjusted data ingestion frequency (every 2 hours)
 - Added local-first raw storage logic and eliminated raw data re-downloads during cleaning phase
-- Deployed EC2 instance and mapped custom domain for portfolio showcase
 - Initiated Phase 3 development: defined project scope
 
 ---

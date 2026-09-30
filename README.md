@@ -27,12 +27,13 @@
 - **Task-Isolated Infrastructure:** Docker
 - **Model Training:** PyTorch Lightning
 - **Experiment Tracking:** W&B
-- **Model Registry:** MLflow
+- **Model Registry:** MLflow (🔜 Phase 3에서 적용)
 - **Inference Serving:** FastAPI
 - **Local Kubernetes Cluster:** Minikube (EKS Alternative)
 - **Serverless Event Trigger:** AWS Lambda
 - **CI/CD Pipeline:** GitHub Actions
-- **Dashboard:** Streamlit
+- **Dashboard (MVP):** Streamlit
+- **Frontend Web Application:** React, TypeScript, Vite, Tailwind CSS (🔜 Phase 4에서 적용)
 - **Message Queue:** Amazon SQS, SNS, Lambda, DynamoDB
 - **Notification Services:** Amazon SES, Slack Webhook
 
@@ -111,9 +112,9 @@
 ## **🎬 MLOps Scenario**
 ### STEP 1. [수집] Data Ingestion (Airflow/S3)
 - Space-Track REST API 호출
-- 관심 발사체·위성군(eg. Starlink, LEO 우주쓰레기)의 TLE 전체 카탈로그(약 35,000건)를 주기적으로 증분 수집
+- 관심 발사체 및 위성군(예: Starlink, LEO 우주쓰레기 등)을 대상으로, 소멸된 개체를 제외한 전체 TLE 카탈로그(약 35,000건)의 주기적 스냅샷 수집 수행
 - 퇴역일이 존재하지 않는 활성화 건만 수집
-- 원본 json을 S3 `raw/` 적재 (eg. `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
+- 원본 json을 S3 `raw/` 적재 (예: `s3://my-bucket/raw/year=2026/month=08/day=22/tle_raw_020100.json`)
 
 ![airflow](./assets/airflow.png)
 
@@ -124,7 +125,7 @@
 - 궤도 요소 기반 변동치: 경사각 $i$, 편심률 $e$, 근지점인구각 $\omega$, 평균운동 $n$ 등에서 계산하는 이상 변동치
 - Screening Engine: 궤도 유사군으로 1차 필터링. KDTree 기반 공간 인덱스 (전체 조합 대신 근접 후보만 빠르게 추출)
 - 상대 거리 계산: 두 객체간 거리가 설정한 근접 임계치 이내인지 평가하여 충돌 위험 후보군 선별
-- parquet 포맷 변환 후 S3 `processed/` 적재 (eg. `s3://my-bucket/processed/year=2026/month=08/day=22/tle_processed_020100.parquet`)
+- parquet 포맷 변환 후 S3 `processed/` 적재 (예: `s3://my-bucket/processed/year=2026/month=08/day=22/tle_processed_020100.parquet`)
 
 ![s3](./assets/s3.png)
 
@@ -145,7 +146,7 @@
 - 패딩된 타임스텝은 학습·평가 양쪽에서 `masked_mse_loss`로 제외
 
 **4. 모델 학습 및 등록**
-- 정상적인 TLE 시퀀스(eg. 지난 30일간의 연속된 궤도 변화 흐름)를 LSTM Autoencoder에 넣어서 "정상 궤도 변화 패턴"을 압축했다가 복원하는 법 학습
+- 정상적인 TLE 시퀀스(예: 72시간 윈도우 기반 연속 궤도 변화)를 LSTM Autoencoder에 넣어서 "정상 궤도 변화 패턴"을 압축했다가 복원하는 법 학습
 - processed parquet load → 오래된 TLE 필터 → 시퀀스 구성 → 객체 기준 85/15 train/val split (data leakage 방지 처리) → 학습 → W&B logging
 - W&B가 무료 티어이므로 artifact storage 소모 없도록 checkpoint와 scaler는 S3 `models/` 경로로 업로드하고 W&B에는 S3 key만 전송
 - DAG는 학습과 체크포인트 업로드까지만 책임지고 K8s rolling update로 처리
@@ -314,6 +315,7 @@ flowchart TD
 </table>
 
 **(Cover Model: 우주토끼 [wouldyou ttokki])**
+> 현재 알림은 1차 스크리닝 결과를 거리순으로 발송해 알림 파이프라인의 end-to-end 동작을 검증하는 단계로, 충돌 확률(PoC) 기반 판정은 Phase 3에서 적용 예정
 
 ---
 
@@ -327,7 +329,7 @@ flowchart TD
   - `DELTA_MEAN_MOTION_PER_HR`이 수백 단위로 튀는 사례 발견. `dt_hours`가 너무 작으면(수분~수초 단위) 나눗셈이 불안정해져서 정상적인 미세한 변화도 시간당 변화율로 환산하는 순간 비정상적으로 폭발할 수 있으므로 최소 간격 미만이면 변화율 계산 자체를 하지 않고 NaN 처리
 
 - **[STEP 2]** `MIN_DISTANCE_KM == 0` (35건): 버그 아니고 실제로 물리적으로 붙어있는 객체들. `MIN_DISTANCE_KM`이 각자 TLE epoch 기준 근사치고 공통 시점 propagate 아님<br>
-eg. ISS 관련 25544, 25575, 26400, 26700, 36086: ISS는 모듈(Zarya, Unity, Zvezda, Destiny, Poisk)마다 별도 NORAD ID가 부여되지만 물리적으로 하나의 구조물이라 좌표가 동일
+e.g. ISS 관련 25544, 25575, 26400, 26700, 36086: ISS는 모듈(Zarya, Unity, Zvezda, Destiny, Poisk)마다 별도 NORAD ID가 부여되지만 물리적으로 하나의 구조물이라 좌표가 동일
 
 - **[STEP 2]** `EPOCH`이 미래 날짜인 건들 검출: 컨테이너에서 실제 시스템 시각 정상 여부 확인 후 raw json을 조회하니 실제로 Space-Track이 미래 epoch을 주고 있음. `MEAN_MOTION`이 모두 1.0 rev/day 미만이라 고고도 장주기 궤도(GTO/HEO/달 궤도 근접)인데, 지상 레이더가 한 궤도 도는 동안 관측할 기회 자체가 적어 원래 며칠~2주 앞선 epoch을 주는 게 정상 동작이라고 함. 차후 `min_snapshots` 조건에서 자동 필터링되므로 수정할 필요 없음
 
@@ -335,14 +337,14 @@ eg. ISS 관련 25544, 25575, 26400, 26700, 36086: ISS는 모듈(Zarya, Unity, Zv
 
 - **[STEP 3]** LSTM Autoencoder가 시계열 모델이므로 개발 중에도 원본 실데이터는 꾸준히 적재하여 충분히 확보할 필요가 있음
 
-- **[STEP 3]** `EPOCH`이 지나치게 오래된 TLE(수십 년간 갱신 안 된 객체, eg. 1965년 VENERA 2)는 실제 최신 궤도 상태를 반영 못하므로 제외. 30일 초과로 걸러진 2,733건 중 다수가 WESTFORD NEEDLES(1960년대 군사 실험 잔해 조각들)인데 위성에 타격이 안되는 미세한 구리바늘 쓰레기인지라 애초에 TLE API 수집 단계에서 이름으로 필터링 하는 것을 고려
+- **[STEP 3]** `EPOCH`이 지나치게 오래된 TLE(수십 년간 갱신 안 된 객체, e.g. 1965년 VENERA 2)는 실제 최신 궤도 상태를 반영 못하므로 제외. 30일 초과로 걸러진 2,733건 중 다수가 WESTFORD NEEDLES(1960년대 군사 실험 잔해 조각들)인데 위성에 타격이 안되는 미세한 구리바늘 쓰레기인지라 애초에 TLE API 수집 단계에서 이름으로 필터링 하는 것을 고려
 
 - **[STEP 3]** LSTM Autoencoder `val_loss` 이상 급등: 원궤도(이심률≈0)에서는 "근지점"이라는 지점 자체가 물리적으로 잘 정의되지 않아서, `ARG_OF_PERICENTER`가 실제 궤도 변화와 무관하게 TLE 재피팅마다 크게 튐. 따라서 preprocessing에서 임계값 미만(원궤도)이면 `ARG_OF_PERICENTER` 델타를 NaN으로 처리
 
 - **[STEP 3]** `sequence_builder`에서 평균/표준편차 대신 median/IQR(robust scaling)을 쓰는 이유: `DELTA_BSTAR_PER_HR` 같은 피처는 신규 발사 위성 등에서 극단치가 자주 나오는데, 평균·표준편차는 그런 극단치에 쉽게 왜곡됨 (STEP 2에서 이미 확인된 문제와 동일 원인)<br>
 median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"를 기준점으로 잡기에 더 안정적
 
-- **[STEP 3]** `sequence_builder`에서 clip(1st/99th percentile)을 같이 두는 이유: `DELTA_ARG_OF_PERICENTER_PER_HR`, `DELTA_RA_OF_ASC_NODE_PER_HR` 같은 각도 기반 델타는 preprocessing 단계에서 0/360도 경계를 넘어갈 때 wraparound 처리가 안 되어 있으면 (eg. 359.9도 → 0.1도인데 단순 차감하면 -359.8로 계산됨) 물리적으로 말이 안 되는 극단치가 섞일 수 있음 (실측: 정상 범위 IQR ~0.2 vs 실제 관측된 최댓값 67 등)<br>
+- **[STEP 3]** `sequence_builder`에서 clip(1st/99th percentile)을 같이 두는 이유: `DELTA_ARG_OF_PERICENTER_PER_HR`, `DELTA_RA_OF_ASC_NODE_PER_HR` 같은 각도 기반 델타는 preprocessing 단계에서 0/360도 경계를 넘어갈 때 wraparound 처리가 안 되어 있으면 (예: 359.9도 → 0.1도인데 단순 차감하면 -359.8로 계산됨) 물리적으로 말이 안 되는 극단치가 섞일 수 있음 (실측: 정상 범위 IQR ~0.2 vs 실제 관측된 최댓값 67 등)<br>
 이 값들이 scaling 후 그대로 들어가면 MSE loss가 소수의 이상치에 압도되므로, 학습 안정성을 위해 1st-99th percentile로 clip
 
 - **[STEP 3]** 모델 학습에서 객체 기준 split을 쓰는 이유: `sequence_builder`가 지금은 객체당 "최신 윈도우 1개"만 만들기 때문에 사실상 객체 하나 = 샘플 하나. 시간 기준으로 자르면 한 객체의 짧은 시퀀스를 더 쪼개는 셈이라 의미가 없어 객체를 통째로 train/val에 배정. 단 객체 단위로 먼저 train/val id를 나누고, scaler는 train 객체의 원본 df 값으로만 계산 (val 정보가 스케일링에 섞여 들어가는 leakage 방지)
@@ -498,7 +500,6 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 - Simple Notification Service 토픽 추가 및 구독자 추가로 메일 스팸 처리 대응
 - 데이터 수집 주기 조정 (2시간마다)
 - raw 로컬 우선 저장 로직 추가 및 정제시 raw 재다운로드 제거
-- 포트폴리오를 위한 EC2 배포 및 도메인 연결
 - Phase 3 개발 착수: 범위 결정
 
 ---
