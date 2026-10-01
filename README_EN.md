@@ -151,6 +151,8 @@ In a future enhancement phase, the anomaly detection score (reconstruction loss)
 - To avoid consuming W&B artifact storage on the free tier, model checkpoints and scalers are uploaded to the S3 `models/` path, while logging only the corresponding S3 keys to W&B.
 - The DAG handles training and checkpoint upload, leaving deployment to K8s rolling updates.
 
+![train](./assets/train.png)
+
 ### STEP 4. [추론/서빙] Inference & Serving (FastAPI/Streamlit)
 - Training and inference share identical directory structures and feature extraction logic (including `sequence_builder`).
 - FastAPI Serving: Accepts a target NORAD ID and returns its orbital anomaly score (reconstruction loss)

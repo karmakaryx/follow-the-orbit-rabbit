@@ -151,6 +151,8 @@
 - W&B가 무료 티어이므로 artifact storage 소모 없도록 checkpoint와 scaler는 S3 `models/` 경로로 업로드하고 W&B에는 S3 key만 전송
 - DAG는 학습과 체크포인트 업로드까지만 책임지고 K8s rolling update로 처리
 
+![train](./assets/train.png)
+
 ### STEP 4. [추론/서빙] Inference & Serving (FastAPI/Streamlit)
 - 모델 학습과 추론·서빙이 feature 로직(`sequence_builder` 등)을 그대로 공유하므로 같은 디렉토리 유지
 - FastAPI serving: 특정 NORAD ID 입력 시 NORAD ID의 궤도 이상 스코어(reconstruction loss) 반환
