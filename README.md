@@ -22,6 +22,7 @@
 - 예측 기간 제한: SGP4/TLE 특성상 오차가 누적되므로, 향후 3~7일 이내의 단기 충돌 위험 1차 경보에 초점을 맞춤
 
 ### Tech Stack
+🚨 안내: Phase 1부터 5까지 순차적으로 개발될 예정입니다. 현재는 프리릴리즈(pre-release)로 Phase 1과 2가 공개되어 있습니다. 🚨
 - **Data Pipeline & Orchestration:** Airflow
 - **Data Lake & Artifact Storage:** S3
 - **Task-Isolated Infrastructure:** Docker
@@ -515,8 +516,7 @@ median/IQR은 그런 극단치 영향을 적게 받아서 "일반적인 궤도"�
 ---
 
 ## **💁🏻‍♀️ Disclaimer**
-지적재산권(IP) 보호를 위해 독자적인 궤도 전파 알고리즘 및 미세 조정된 위험 평가 모델의 가중치 등은 마스킹 처리되어 있습니다.<br>
-본 저장소는 가상 평가 모듈을 활용하여 end-to-end MLOps 인프라 및 파이프라인의 핵심 기능을 시연합니다.<br>
-<br>
+지적재산권(IP) 보호를 위해 SGP4/Skyfield 기반의 자체 궤도 연산 로직 및 미세 조정된 위험 평가 모델의 가중치 등은 일부 마스킹 처리되어 있습니다.<br>
+본 저장소는 실제 TLE 데이터를 활용한 데모 평가 파이프라인을 통해 end-to-end MLOps 인프라의 핵심 기능을 시연합니다.<br>
 
 <p align="center"><b>Copyright © 2026 Mua💋無我 by Karyx💫. All Rights Reserved.</b></p>

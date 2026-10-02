@@ -22,6 +22,7 @@
 - Prediction Range Limits: Due to error accumulation inherent to SGP4/TLE propagators, the system focuses on short-term (within 3 to 7 days) primary collision risk alerts
 
 ### Tech Stack
+🚨 NOTICE: Phases 1 thru 5 will be developed sequentially. Phase 1&2 are currently open as a prerelease. 🚨
 - **Data Pipeline & Orchestration:** Airflow
 - **Data Lake & Artifact Storage:** S3
 - **Task-Isolated Infrastructure:** Docker
@@ -514,8 +515,8 @@ TL;DR: Don't use GHA schedules for production.
 ---
 
 ## **💁🏻‍♀️ Disclaimer**
-Proprietary orbit propagation algorithms, fine-tuned risk model weights, etc., are masked for IP protection.<br>
-The repository demonstrates the end-to-end MLOps infrastructure and pipeline functionality using mock evaluation modules.<br>
+For intellectual property protection, proprietary orbital calculation logic based on SGP4/Skyfield and fine-tuned risk assessment model weights have been partially masked.
+This repository demonstrates the core capabilities of an end-to-end MLOps infrastructure using a demo evaluation pipeline powered by real TLE data.<br>
 <br>
 
 <p align="center"><b>Copyright © 2026 Mua💋無我 by Karyx💫. All Rights Reserved.</b></p>
