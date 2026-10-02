@@ -1,6 +1,7 @@
 boto3
-pandas
-pyarrow
+numpy==2.4.6
+pandas==3.0.5
+pyarrow==25.0.1
 python-dotenv
 requests
 scipy
