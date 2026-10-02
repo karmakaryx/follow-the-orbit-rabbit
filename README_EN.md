@@ -49,7 +49,8 @@
 ### Architecture
 ![architecture](./assets/architecture.png)
 > In the current implementation (Phase 2), the 1st-stage distance-based screening results from preprocessing.py are directly published to the Alert Pipeline.<br>
-In a future enhancement phase, the anomaly detection score (reconstruction loss) from serve.py will be integrated as a 2nd-stage filter to complete fine inference and PoC (Probability of Collision) calculations, triggering alerts only when the risk exceeds a predefined threshold (e.g. $\text{PoC} \ge 10^{-4}$).
+In a future enhancement phase, the anomaly detection score (reconstruction loss) from serve.py will be integrated as a 2nd-stage filter to complete fine inference and PoC (Probability of Collision) calculations, triggering alerts only when the risk exceeds a predefined threshold (e.g. $\text{PoC} \ge 10^{-4}$).<br>
+Note on known limitation: Maneuver-induced score volatility will be addressed in a subsequent phase.
 
 <br>
 <details>
@@ -246,7 +247,7 @@ flowchart LR
 - Since GitHub-hosted default runners cannot access the local Minikube kubectl context, registered a self-hosted runner directly on the host machine to maintain an always-on deployment agent.
 - Registered as a systemd service using `svc.sh` and verified its active (running) status.
 - Cluster access privileges currently run on the local kubeconfig credentials of the host machine. Be aware that adding collaborators to the GitHub repository in the future poses security risks regarding potential leakage of Secrets or credentials via workflows, requiring careful access management.
-- Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual `workflow_dispatch` execution.
+- Added scheduled workflows in GitHub Actions to trigger automatically at designated daily times (scheduled post-model training), with support for manual `workflow_dispatch` execution. (Scheduling is currently unused, having been unified under Lambda event-driven triggers.)
 - By architectural design, Airflow does not handle K8s deployments; instead, an independent script runs via GitHub Actions schedule to compare the latest checkpoint in S3 with the active Deployment. Upon detecting changes, it patches annotations to produce a Pod template diff, triggering a zero-downtime rolling restart without rebuilding images.
 - Automatically rolls back to the previous revision if the rollout fails to succeed within the timeout window.
 

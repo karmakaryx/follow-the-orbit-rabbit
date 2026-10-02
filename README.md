@@ -49,7 +49,8 @@
 ### Architecture
 ![architecture](./assets/architecture.png)
 > 현재 구현(Phase 2)은 preprocessing.py의 거리 기반 1차 스크리닝 결과가 곧바로 Alert Pipeline으로 발행됩니다.<br>
-차후 고도화 단계에서 serve.py의 이상 탐지 점수(reconstruction loss)를 2차 필터로 통합해 정밀 추론 및 PoC(Probability of Collision) 계산을 완료하고, 설정한 위험 임계치(예: $\text{PoC} \ge 10^{-4}$)를 초과하는 경우에만 알람이 발송될 예정입니다.
+차후 고도화 단계에서 serve.py의 이상 탐지 점수(reconstruction loss)를 2차 필터로 통합해 정밀 추론 및 PoC(Probability of Collision) 계산을 완료하고, 설정한 위험 임계치(예: $\text{PoC} \ge 10^{-4}$)를 초과하는 경우에만 알람이 발송될 예정입니다.<br>
+알려진 한계점 참고: 기동(회피/운항 조작)으로 인한 스코어 변동성 문제는 차후 단계에서 다룰 예정입니다.
 
 <br>
 <details>
@@ -246,7 +247,7 @@ flowchart LR
 - GitHub 기본 제공 러너(cloud-hosted)는 로컬 Minikube의 kubectl 컨텍스트에 접근할 방법이 없으므로, 호스트에 self-hosted runner를 직접 등록하여 상시 대기 상태로 배포
 - `svc.sh`로 systemd 서비스 등록하고 active (running) 확인
 - 클러스터 접근 권한은 현재 본인 머신의 로컬 kubeconfig 권한으로 실행됨. 향후 GitHub repo에 협업자 추가시 workflow를 통해 Secrets 값이나 권한이 유출될 수 있는 점 인지하고 관리 필요
-- GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 `workflow_dispatch` 실행 가능
+- GitHub Actions에 scheduled workflow 추가, 매일 정해진 시각(학습 완료 이후 스케줄링) 자동 실행되며, 필요 시 수동 `workflow_dispatch` 실행 가능 (현재 스케줄링은 사용 안함. Lambda event-driven trigger로 단일화)
 - Airflow는 정책상 K8s 배포에 관여하지 않으며, 완전히 독립된 스크립트가 GitHub Actions 스케줄로 동작해 S3의 최신 체크포인트와 현재 Deployment를 비교한 뒤, 변경사항이 있으면 annotation을 patch하여 Pod template diff를 만들어 이미지 재빌드 없이 rolling restart trigger
 - rollout이 timeout 안에 성공하지 못하면 이전 revision으로 자동 롤백
 
