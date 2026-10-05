@@ -22,7 +22,7 @@
 - 예측 기간 제한: SGP4/TLE 특성상 오차가 누적되므로, 향후 3~7일 이내의 단기 충돌 위험 1차 경보에 초점을 맞춤
 
 ### Tech Stack
-🚨 안내: Phase 1부터 5까지 순차적으로 개발될 예정입니다. 현재는 프리릴리즈(pre-release)로 Phase 1과 2가 공개되어 있습니다. 🚨
+🚨 안내: Phase 1부터 5까지 순차적으로 개발될 예정입니다. 현재는 pre-release로 Phase 1과 2가 공개되어 있습니다. 🚨
 - **Data Pipeline & Orchestration:** Airflow
 - **Data Lake & Artifact Storage:** S3
 - **Task-Isolated Infrastructure:** Docker
@@ -54,7 +54,7 @@
 
 <br>
 <details>
-<summary><b>📁 Directory Structure (click to expand)</b></summary>
+<summary><b>📁 Directory Structure</b> (CLICK TO EXPAND)</summary>
 
 ### Directory
 ```
@@ -107,6 +107,7 @@
 ├── README.md
 └── uv.lock                       # 의존성 lock 파일
 ```
+
 </details>
 
 ---
