@@ -9,6 +9,20 @@
   [ <a href="./README_EN.md">English</a> | <a href="./README.md">한국어</a> ]
 </p>
 
+## ⚡ TL;DR
+**Space-Track TLE 약 35,000건을 2시간마다 수집해 궤도 이상을 탐지하고, 충돌 후보를 알림으로 보내는 end-to-end MLOps 시스템**
+
+- **파이프라인**: Airflow 수집/전처리 → S3 → LSTM Autoencoder 일 1회 자동 학습(W&B) → FastAPI 서빙
+- **무중단 배포**: 모델 체크포인트가 S3에 올라오면 Lambda가 CI/CD를 즉시 트리거 → K8s 롤링 업데이트, 타임아웃 시 자동 롤백
+- **오토스케일링 검증**: HPA 부하 테스트로 replica 1 → 3 확장 및 안정화 후 축소 확인
+- **알림 시스템**: SQS → Lambda → DynamoDB(24h 중복 차단) + SES/Slack, 실패 격리용 DLQ
+- **스크리닝**: 전체 조합 계산(억 단위)을 KDTree 근접 후보 추출로 대체
+- **운영 최적화**: 이미지 10.1GB → 2.49GB, S3 재다운로드 월 약 34GB 제거, OOMKilled 원인 추적 및 probe 분리
+
+**현재 상태 (Phase 2/5 완료)**: 알림은 거리 기반 1차 스크리닝 결과 기준이며, 모델 이상 점수 및 PoC 기반 판정은 Phase 3에서 연동 예정
+
+---
+
 ## **🛰️ Project Info**
 ### Project Objectives
 - 위성·발사체·우주쓰레기 간 충돌 위험 이상 감지 (Collision Avoidance Anomaly Detection)
@@ -54,7 +68,7 @@
 
 <br>
 <details>
-<summary><b>📁 Directory Structure</b> (CLICK TO EXPAND)</summary>
+<summary><b>📁 Directory Structure (CLICK TO EXPAND)</b></summary>
 
 ### Directory
 ```

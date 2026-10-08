@@ -54,7 +54,7 @@ Note on known limitation: Maneuver-induced score volatility will be addressed in
 
 <br>
 <details>
-<summary><b>📁 Directory Structure (click to expand)</b></summary>
+<summary><b>📁 Directory Structure (CLICK TO EXPAND)</b></summary>
 
 ### Directory
 ```
@@ -107,6 +107,7 @@ Note on known limitation: Maneuver-induced score volatility will be addressed in
 ├── README.md
 └── uv.lock                       # dependency lock file
 ```
+
 </details>
 
 ---
