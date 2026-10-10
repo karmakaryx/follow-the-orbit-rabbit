@@ -20,6 +20,8 @@ CONJUNCTION_SCREENING_THRESHOLD_KM = float(
     os.getenv("CONJUNCTION_SCREENING_THRESHOLD_KM", "25.0")
 )
 
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
+
 # 심우주/달 궤도 미션(ARTEMIS, Chang'e, Chandrayaan, DRO 등) 제외
 # GEO 고도(~35,786km) + HEO(Molniya/Tundra 등, apogee 최대 ~46,000km)까지는 유지
 DEEP_SPACE_ALT_THRESHOLD_KM = float(
@@ -133,6 +135,11 @@ def compute_conjunction_screening(df: pd.DataFrame, threshold_km: float = CONJUN
     # Note by Karyx💫: This code is omitted to protect my intellectual property.
 
 
+def publish_conjunction_alerts(df: pd.DataFrame, sqs_client, queue_url: str) -> None:
+    ...
+    # Note by Karyx💫: This code is omitted to protect my intellectual property.
+
+
 def get_reference_processed_df(s3_client, bucket: str, target_time: datetime, tolerance_days: int = 1) -> pd.DataFrame | None:
     # target_time에 가장 가까운 processed 파일을 찾아 로드
     candidate_dates = {
@@ -194,8 +201,15 @@ def main():
     prev_df = get_reference_processed_df(s3_client, S3_BUCKET_NAME, target_time)
     df = compute_orbital_deviation(df, prev_df)
 
-    # 5. 상대 거리 1차 screening
+    # 5-1. 상대 거리 1차 screening
     df = compute_conjunction_screening(df)
+
+    # 5-2. 충돌 후보 SQS 알림 발행
+    if SQS_QUEUE_URL:
+        sqs_client = boto3.client("sqs")
+        publish_conjunction_alerts(df, sqs_client, SQS_QUEUE_URL)
+    else:
+        print("⚠️ SQS_QUEUE_URL not set, skipping conjunction alert publish.")
 
     # 6. Parquet 변환
     buffer = io.BytesIO()
